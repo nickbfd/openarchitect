@@ -19,6 +19,8 @@ else()
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+include(GNUInstallDirs)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(Dependencies)
 

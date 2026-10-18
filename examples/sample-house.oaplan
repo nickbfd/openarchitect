@@ -1,0 +1,523 @@
+{
+  "document": {
+    "beams": [
+      {
+        "a": [
+          288.0,
+          168.0
+        ],
+        "b": [
+          480.0,
+          168.0
+        ],
+        "id": 16,
+        "levelId": 1,
+        "memberId": ""
+      }
+    ],
+    "levels": [
+      {
+        "elevation": 0.0,
+        "floorThickness": 12.875,
+        "id": 1,
+        "name": "Floor 1",
+        "wallHeight": 97.125
+      },
+      {
+        "elevation": 110.0,
+        "floorThickness": 12.875,
+        "id": 2,
+        "name": "Floor 2",
+        "wallHeight": 97.125
+      }
+    ],
+    "name": "Sample house",
+    "nextId": 35,
+    "openings": [
+      {
+        "height": 80.0,
+        "id": 9,
+        "kind": "door",
+        "offset": 96.0,
+        "sillHeight": 0.0,
+        "wallId": 3,
+        "width": 36.0
+      },
+      {
+        "height": 48.0,
+        "id": 10,
+        "kind": "window",
+        "offset": 240.0,
+        "sillHeight": 36.0,
+        "wallId": 3,
+        "width": 72.0
+      },
+      {
+        "height": 48.0,
+        "id": 11,
+        "kind": "window",
+        "offset": 384.0,
+        "sillHeight": 36.0,
+        "wallId": 3,
+        "width": 36.0
+      },
+      {
+        "height": 48.0,
+        "id": 12,
+        "kind": "window",
+        "offset": 84.0,
+        "sillHeight": 36.0,
+        "wallId": 4,
+        "width": 36.0
+      },
+      {
+        "height": 48.0,
+        "id": 13,
+        "kind": "window",
+        "offset": 144.0,
+        "sillHeight": 36.0,
+        "wallId": 5,
+        "width": 48.0
+      },
+      {
+        "height": 80.0,
+        "id": 14,
+        "kind": "door",
+        "offset": 360.0,
+        "sillHeight": 0.0,
+        "wallId": 5,
+        "width": 72.0
+      },
+      {
+        "height": 48.0,
+        "id": 15,
+        "kind": "window",
+        "offset": 84.0,
+        "sillHeight": 36.0,
+        "wallId": 6,
+        "width": 36.0
+      },
+      {
+        "height": 48.0,
+        "id": 26,
+        "kind": "window",
+        "offset": 96.0,
+        "sillHeight": 36.0,
+        "wallId": 21,
+        "width": 48.0
+      },
+      {
+        "height": 48.0,
+        "id": 27,
+        "kind": "window",
+        "offset": 384.0,
+        "sillHeight": 36.0,
+        "wallId": 21,
+        "width": 48.0
+      },
+      {
+        "height": 48.0,
+        "id": 28,
+        "kind": "window",
+        "offset": 168.0,
+        "sillHeight": 36.0,
+        "wallId": 22,
+        "width": 36.0
+      },
+      {
+        "height": 48.0,
+        "id": 29,
+        "kind": "window",
+        "offset": 120.0,
+        "sillHeight": 36.0,
+        "wallId": 23,
+        "width": 36.0
+      },
+      {
+        "height": 48.0,
+        "id": 30,
+        "kind": "window",
+        "offset": 360.0,
+        "sillHeight": 36.0,
+        "wallId": 23,
+        "width": 36.0
+      }
+    ],
+    "platforms": [
+      {
+        "area": {
+          "max": [
+            480.0,
+            336.0
+          ],
+          "min": [
+            0.0,
+            0.0
+          ]
+        },
+        "deadPsf": 10.0,
+        "id": 33,
+        "joistAxis": "y",
+        "levelId": 2,
+        "livePsf": 40.0
+      }
+    ],
+    "roofs": [
+      {
+        "atticLivePsf": 10.0,
+        "ceilingDeadPsf": 10.0,
+        "deadPsf": 15.0,
+        "footprint": {
+          "max": [
+            480.0,
+            336.0
+          ],
+          "min": [
+            0.0,
+            0.0
+          ]
+        },
+        "hasCeiling": true,
+        "id": 34,
+        "levelId": 2,
+        "overhang": 18.0,
+        "pitch": 6.0,
+        "ridgeAxis": "x",
+        "structuralRidge": false,
+        "style": "gable"
+      }
+    ],
+    "rooms": [
+      {
+        "id": 17,
+        "levelId": 1,
+        "name": "Living",
+        "outline": [
+          [
+            288.0,
+            0.0
+          ],
+          [
+            480.0,
+            0.0
+          ],
+          [
+            480.0,
+            336.0
+          ],
+          [
+            288.0,
+            336.0
+          ]
+        ],
+        "type": "living"
+      },
+      {
+        "id": 18,
+        "levelId": 1,
+        "name": "Kitchen",
+        "outline": [
+          [
+            0.0,
+            0.0
+          ],
+          [
+            288.0,
+            0.0
+          ],
+          [
+            288.0,
+            168.0
+          ],
+          [
+            0.0,
+            168.0
+          ]
+        ],
+        "type": "kitchen"
+      },
+      {
+        "id": 19,
+        "levelId": 1,
+        "name": "Office",
+        "outline": [
+          [
+            0.0,
+            168.0
+          ],
+          [
+            192.0,
+            168.0
+          ],
+          [
+            192.0,
+            336.0
+          ],
+          [
+            0.0,
+            336.0
+          ]
+        ],
+        "type": "bedroom"
+      },
+      {
+        "id": 20,
+        "levelId": 1,
+        "name": "Dining",
+        "outline": [
+          [
+            192.0,
+            168.0
+          ],
+          [
+            288.0,
+            168.0
+          ],
+          [
+            288.0,
+            336.0
+          ],
+          [
+            192.0,
+            336.0
+          ]
+        ],
+        "type": "living"
+      },
+      {
+        "id": 31,
+        "levelId": 2,
+        "name": "Bedroom 1",
+        "outline": [
+          [
+            0.0,
+            0.0
+          ],
+          [
+            240.0,
+            0.0
+          ],
+          [
+            240.0,
+            336.0
+          ],
+          [
+            0.0,
+            336.0
+          ]
+        ],
+        "type": "bedroom"
+      },
+      {
+        "id": 32,
+        "levelId": 2,
+        "name": "Bedroom 2",
+        "outline": [
+          [
+            240.0,
+            0.0
+          ],
+          [
+            480.0,
+            0.0
+          ],
+          [
+            480.0,
+            336.0
+          ],
+          [
+            240.0,
+            336.0
+          ]
+        ],
+        "type": "bedroom"
+      }
+    ],
+    "site": {
+      "exposureCe": 1.0,
+      "groundSnowPsf": 30.0,
+      "importanceIs": 1.0,
+      "thermalCt": 1.1
+    },
+    "walls": [
+      {
+        "a": [
+          0.0,
+          0.0
+        ],
+        "b": [
+          480.0,
+          0.0
+        ],
+        "bearing": true,
+        "height": 0.0,
+        "id": 3,
+        "levelId": 1,
+        "selfWeightPsf": 10.0,
+        "thickness": 5.5
+      },
+      {
+        "a": [
+          480.0,
+          0.0
+        ],
+        "b": [
+          480.0,
+          336.0
+        ],
+        "bearing": true,
+        "height": 0.0,
+        "id": 4,
+        "levelId": 1,
+        "selfWeightPsf": 10.0,
+        "thickness": 5.5
+      },
+      {
+        "a": [
+          480.0,
+          336.0
+        ],
+        "b": [
+          0.0,
+          336.0
+        ],
+        "bearing": true,
+        "height": 0.0,
+        "id": 5,
+        "levelId": 1,
+        "selfWeightPsf": 10.0,
+        "thickness": 5.5
+      },
+      {
+        "a": [
+          0.0,
+          336.0
+        ],
+        "b": [
+          0.0,
+          0.0
+        ],
+        "bearing": true,
+        "height": 0.0,
+        "id": 6,
+        "levelId": 1,
+        "selfWeightPsf": 10.0,
+        "thickness": 5.5
+      },
+      {
+        "a": [
+          0.0,
+          168.0
+        ],
+        "b": [
+          288.0,
+          168.0
+        ],
+        "bearing": true,
+        "height": 0.0,
+        "id": 7,
+        "levelId": 1,
+        "selfWeightPsf": 10.0,
+        "thickness": 4.5
+      },
+      {
+        "a": [
+          192.0,
+          168.0
+        ],
+        "b": [
+          192.0,
+          336.0
+        ],
+        "bearing": false,
+        "height": 0.0,
+        "id": 8,
+        "levelId": 1,
+        "selfWeightPsf": 8.0,
+        "thickness": 4.5
+      },
+      {
+        "a": [
+          0.0,
+          0.0
+        ],
+        "b": [
+          480.0,
+          0.0
+        ],
+        "bearing": true,
+        "height": 0.0,
+        "id": 21,
+        "levelId": 2,
+        "selfWeightPsf": 10.0,
+        "thickness": 5.5
+      },
+      {
+        "a": [
+          480.0,
+          0.0
+        ],
+        "b": [
+          480.0,
+          336.0
+        ],
+        "bearing": true,
+        "height": 0.0,
+        "id": 22,
+        "levelId": 2,
+        "selfWeightPsf": 10.0,
+        "thickness": 5.5
+      },
+      {
+        "a": [
+          480.0,
+          336.0
+        ],
+        "b": [
+          0.0,
+          336.0
+        ],
+        "bearing": true,
+        "height": 0.0,
+        "id": 23,
+        "levelId": 2,
+        "selfWeightPsf": 10.0,
+        "thickness": 5.5
+      },
+      {
+        "a": [
+          0.0,
+          336.0
+        ],
+        "b": [
+          0.0,
+          0.0
+        ],
+        "bearing": true,
+        "height": 0.0,
+        "id": 24,
+        "levelId": 2,
+        "selfWeightPsf": 10.0,
+        "thickness": 5.5
+      },
+      {
+        "a": [
+          240.0,
+          0.0
+        ],
+        "b": [
+          240.0,
+          336.0
+        ],
+        "bearing": false,
+        "height": 0.0,
+        "id": 25,
+        "levelId": 2,
+        "selfWeightPsf": 8.0,
+        "thickness": 4.5
+      }
+    ]
+  },
+  "format": "openarchitect-plan",
+  "schemaVersion": 1
+}
