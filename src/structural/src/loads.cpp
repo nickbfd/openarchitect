@@ -15,6 +15,18 @@ const char* shortName(LoadCase c) {
     return "?";
 }
 
+const char* toString(LoadOrigin o) {
+    switch (o) {
+    case LoadOrigin::Roof: return "Roof";
+    case LoadOrigin::Ceiling: return "Ceiling and attic";
+    case LoadOrigin::Floor: return "Floor";
+    case LoadOrigin::Wall: return "Walls above";
+    case LoadOrigin::Beam: return "Beams and posts";
+    case LoadOrigin::Other: return "Other";
+    }
+    return "Other";
+}
+
 CaseLoads CaseLoads::operator+(const CaseLoads& o) const {
     CaseLoads r = *this;
     return r += o;
@@ -116,6 +128,17 @@ LineLoadSummary summarize(const std::vector<LineLoad>& loads) {
                 }
             }
         }
+    }
+    return out;
+}
+
+std::vector<OriginSummary> summarizeByOrigin(const std::vector<LineLoad>& loads) {
+    std::vector<OriginSummary> out;
+    for (int o = 0; o < kOriginCount; ++o) {
+        std::vector<LineLoad> group;
+        for (const auto& l : loads)
+            if (static_cast<int>(l.origin) == o) group.push_back(l);
+        if (!group.empty()) out.push_back({static_cast<LoadOrigin>(o), summarize(group)});
     }
     return out;
 }

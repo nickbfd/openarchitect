@@ -10,7 +10,7 @@ All loads are stored unfactored, per case: dead (D), floor live (L), roof live (
 | --- | --- | --- |
 | Roof dead | Entered on the roof surface (default 15 psf), converted to horizontal projection by dividing by cos(slope) | |
 | Roof live | 20 psf on horizontal projection | IRC R301.6 |
-| Snow | Balanced roof snow `ps = Cs x 0.7 Ce Ct Is pg`, with the low-slope minimum under 15 degrees | ASCE 7-16 Ch. 7 |
+| Snow | Balanced roof snow `ps = Cs x 0.7 Ce Ct Is pg`, with the low-slope minimum under 15 degrees, or a custom value entered on the roof | ASCE 7-16 Ch. 7 |
 | Ceiling | Default 10 psf dead, attic live 10 psf (no storage) or 20 psf (limited storage) | IRC Table R301.5 |
 | Floor | Default 10 psf dead, 40 psf live (30 sleeping rooms, 40 decks, 60 balconies, 50 garages) | IRC Table R301.5 |
 | Walls | Self weight per square foot of wall face times wall height (default 10 psf) | |
@@ -21,9 +21,13 @@ Not yet included: snow drifts, unbalanced snow, rain-on-snow, roof live load red
 
 1. **Roofs.** Gable roofs with a ridge board and ceiling ties put each half of the roof on its eave wall: tributary width = half the span + overhang. With a structural ridge beam, each rafter is a simple span from wall to ridge with a cantilevered overhang: the wall takes `(run + o)^2 / (2 run)` and the ridge beam takes `(run^2 - o^2) / (2 run)` from each side. The ridge beam's end reactions go down as point loads to the walls beneath its ends.
    Hip roofs divide the footprint by its straight skeleton (45 degree hips in plan for equal pitches), so each wall carries a triangular or trapezoidal load whose depth at any point is `min(s, length - s, width / 2)`, plus the overhang strip.
+   A single roof plane spans from its eave bearing line up to its high bearing line with the overhang cantilevered past the eave: the eave support takes `(run + o)^2 / (2 run)` and the high support `(run^2 - o^2) / (2 run)`. Its ceiling, if any, splits half and half.
+   **Rafters or trusses.** With rafters, ceiling joists bear on every bearing wall they cross, and a gable can have a structural ridge beam. Trusses span from eave to eave, so the ceiling on their bottom chords bears on the walls at the ends of the span only, interior walls get no roof or ceiling load, and there is no ridge beam. The truss maker designs the trusses themselves.
 2. **Ceilings and floors** are one-way framing. Supports are the bearing walls and beams that run across the joists. Each support takes half the distance to the next support on each side; the first and last supports also take any cantilever to the edge. Where supports only cover part of the floor, the floor is split into strips and each strip is solved on its own.
 3. **Beams** are solved as simple spans. Their end reactions become point loads on the wall or beam they bear on, or on whatever is beneath the post at that end.
 4. **Walls** add their self weight and pass everything to the bearing walls and beams directly beneath, level by level, down to the foundation.
+
+Every load keeps its origin (roof, ceiling and attic, floor, walls above, beams and posts) as it passes down, so each wall can show what it carries from each source as well as its own weight and the total at its base.
 
 Anything with no support beneath it produces a warning that names the member and the unsupported length.
 

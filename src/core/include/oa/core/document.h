@@ -73,24 +73,68 @@ struct FloorPlatform {
     double livePsf = 40.0;
 };
 
+// How a roof is framed. Rafters bear on every wall below them through
+// ceiling joists and can use a structural ridge; trusses span from eave to
+// eave, so the ceiling hung from their bottom chords bears on the eave walls only.
+enum class RoofFraming { Rafters, Trusses };
+
+// Settings shared by every kind of roof: slope, overhang, framing, the
+// ceiling below it and its design loads.
+struct RoofSettings {
+    double pitch = 6.0;          // rise in 12
+    double overhang = 18.0;      // inches, horizontal, past the eave bearing line
+    double deadPsf = 15.0;       // on the roof surface
+    RoofFraming framing = RoofFraming::Rafters;
+    bool hasCeiling = true;      // ceiling joists or truss bottom chords carrying a ceiling
+    double ceilingDeadPsf = 10.0;
+    double atticLivePsf = 10.0;  // IRC: 10 psf uninhabitable attic without storage
+    bool customSnow = false;     // use snowPsf instead of the snow calculated from the site
+    double snowPsf = 0.0;        // balanced roof snow on the horizontal projection, psf
+
+    double slopeRadians() const { return std::atan(pitch / 12.0); }
+};
+
 // A rectangular gable or hip roof bearing on the walls of `levelId`. The
 // footprint is measured to the bearing lines (wall centerlines); overhang
 // extends beyond it on the eave sides (and on all sides for a hip roof).
-struct Roof {
+struct Roof : RoofSettings {
     ObjectId id = kNoId;
     ObjectId levelId = kNoId;
     RoofStyle style = RoofStyle::Gable;
     Rect footprint;
     Axis ridgeAxis = Axis::X;
-    double pitch = 6.0;          // rise in 12
-    double overhang = 18.0;      // inches, horizontal
-    double deadPsf = 15.0;       // on the roof surface
     bool structuralRidge = false;// ridge beam carrying rafters, versus ridge board with ties
-    bool hasCeiling = true;      // ceiling joists spanning between the eave walls
-    double ceilingDeadPsf = 10.0;
-    double atticLivePsf = 10.0;  // IRC: 10 psf uninhabitable attic without storage
 
-    double slopeRadians() const { return std::atan(pitch / 12.0); }
+    bool hasRidgeBeam() const {
+        return structuralRidge && style == RoofStyle::Gable && framing == RoofFraming::Rafters;
+    }
+};
+
+// One flat sloped roof plane, drawn on its own: a shed roof, a porch roof,
+// or one face of a roof built plane by plane. It bears along its low (eave)
+// line from `a` to `b` and rises to the left of that line for `run` inches,
+// where it bears on its high line. The overhang extends past the eave.
+struct RoofPlane : RoofSettings {
+    ObjectId id = kNoId;
+    ObjectId levelId = kNoId;
+    Vec2 a, b;
+    double run = 120.0;
+
+    RoofPlane() {
+        pitch = 3.0;
+        hasCeiling = false;
+    }
+
+    Vec2 upslope() const { return (b - a).normalized().perp(); }
+    Segment eaveLine() const { return {a, b}; }
+    Segment highLine() const { return {a + upslope() * run, b + upslope() * run}; }
+    double eaveLength() const { return distance(a, b); }
+    // Corners of the bearing area, or of the roof surface with `overhang` added.
+    Polygon outline(bool withOverhang = false) const {
+        const Vec2 down = upslope() * -(withOverhang ? overhang : 0.0);
+        const Vec2 up = upslope() * run;
+        return {a + down, b + down, b + up, a + up};
+    }
 };
 
 // A dropped or flush beam on `levelId`, carrying what sits on top of it from
@@ -123,6 +167,7 @@ struct Document {
     std::vector<Room> rooms;
     std::vector<FloorPlatform> platforms;
     std::vector<Roof> roofs;
+    std::vector<RoofPlane> roofPlanes;
     std::vector<Beam> beams;
     ObjectId nextId = 1;
 
@@ -150,6 +195,11 @@ struct Document {
     FloorPlatform* platform(ObjectId id) { return findIn(platforms, id); }
     Roof* roof(ObjectId id) { return findIn(roofs, id); }
     const Roof* roof(ObjectId id) const { return findIn(roofs, id); }
+    RoofPlane* roofPlane(ObjectId id) { return findIn(roofPlanes, id); }
+    const RoofPlane* roofPlane(ObjectId id) const { return findIn(roofPlanes, id); }
+    // The settings of a roof or a roof plane.
+    RoofSettings* roofSettings(ObjectId id);
+    const RoofSettings* roofSettings(ObjectId id) const;
     Beam* beam(ObjectId id) { return findIn(beams, id); }
     const Beam* beam(ObjectId id) const { return findIn(beams, id); }
 
@@ -160,6 +210,9 @@ struct Document {
     const Level* levelAbove(ObjectId levelId) const;
 
     double wallHeight(const Wall& w) const;
+    // The level an object is on (an opening's is its wall's), or kNoId.
+    ObjectId levelOf(ObjectId id) const;
+    bool contains(ObjectId id) const;
     std::vector<const Opening*> openingsIn(ObjectId wallId) const;
 
     // Removes any object by id, along with objects that depend on it

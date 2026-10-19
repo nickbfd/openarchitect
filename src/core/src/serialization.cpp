@@ -21,6 +21,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(RoomType, {
 })
 NLOHMANN_JSON_SERIALIZE_ENUM(OpeningKind, {{OpeningKind::Door, "door"}, {OpeningKind::Window, "window"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(RoofStyle, {{RoofStyle::Gable, "gable"}, {RoofStyle::Hip, "hip"}})
+NLOHMANN_JSON_SERIALIZE_ENUM(RoofFraming, {{RoofFraming::Rafters, "rafters"}, {RoofFraming::Trusses, "trusses"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(Axis, {{Axis::X, "x"}, {Axis::Y, "y"}})
 
 // Points are written as [x, y] to keep files compact and readable.
@@ -40,12 +41,15 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Room, id, levelId, name, type, o
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FloorPlatform, id, levelId, area, joistAxis, deadPsf,
                                                 livePsf)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Roof, id, levelId, style, footprint, ridgeAxis, pitch,
-                                                overhang, deadPsf, structuralRidge, hasCeiling,
-                                                ceilingDeadPsf, atticLivePsf)
+                                                overhang, deadPsf, framing, structuralRidge, hasCeiling,
+                                                ceilingDeadPsf, atticLivePsf, customSnow, snowPsf)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoofPlane, id, levelId, a, b, run, pitch, overhang, deadPsf,
+                                                framing, hasCeiling, ceilingDeadPsf, atticLivePsf,
+                                                customSnow, snowPsf)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Beam, id, levelId, a, b, memberId)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Site, groundSnowPsf, exposureCe, thermalCt, importanceIs)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Document, name, site, levels, walls, openings, rooms,
-                                                platforms, roofs, beams, nextId)
+                                                platforms, roofs, roofPlanes, beams, nextId)
 
 namespace {
 
@@ -94,7 +98,7 @@ Document documentFromJson(const std::string& text) {
             for (const auto& o : v) maxId = std::max(maxId, o.id);
         };
         scan(doc.levels); scan(doc.walls); scan(doc.openings); scan(doc.rooms);
-        scan(doc.platforms); scan(doc.roofs); scan(doc.beams);
+        scan(doc.platforms); scan(doc.roofs); scan(doc.roofPlanes); scan(doc.beams);
         doc.nextId = std::max(doc.nextId, maxId + 1);
         return doc;
     } catch (const json::exception& e) {

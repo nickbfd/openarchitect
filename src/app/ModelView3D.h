@@ -13,7 +13,8 @@
 
 class Workspace;
 
-// Live 3D model of the plan with an orbit camera. Left drag orbits,
+// Live 3D model of the plan with an orbit camera. A left click selects the
+// wall, opening, beam, roof or floor under the cursor; left drag orbits,
 // right or middle drag pans, the wheel zooms, and F frames the model.
 class ModelView3D : public QOpenGLWidget, protected QOpenGLFunctions {
     Q_OBJECT
@@ -30,12 +31,15 @@ protected:
     void paintGL() override;
     void mousePressEvent(QMouseEvent* e) override;
     void mouseMoveEvent(QMouseEvent* e) override;
+    void mouseReleaseEvent(QMouseEvent* e) override;
     void wheelEvent(QWheelEvent* e) override;
     void keyPressEvent(QKeyEvent* e) override;
 
 private:
     void rebuild();
     QVector3D eye() const;
+    QMatrix4x4 viewProjection() const;
+    void pickAt(QPoint pos);
 
     Workspace* ws_;
     Mesh mesh_;
@@ -53,4 +57,6 @@ private:
     float pitch_ = 25.0f;
     float distance_ = 1200.0f;
     QPoint lastPos_;
+    QPoint pressPos_;
+    bool dragged_ = false;
 };
