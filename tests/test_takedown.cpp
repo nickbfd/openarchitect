@@ -1,4 +1,6 @@
 #include "oa/core/document.h"
+#include "oa/core/roof_builder.h"
+#include "oa/structural/rafters.h"
 #include "oa/structural/takedown.h"
 
 #include <catch2/catch_approx.hpp>
@@ -295,4 +297,56 @@ TEST_CASE("first floor walls keep roof, floor and wall loads apart") {
     // The bottom of the wall adds its own weight to everything on top.
     CHECK(south->bottomLoads().peakPlf[LoadCase::Dead] ==
           Approx(south->topLoads().peakPlf[LoadCase::Dead] + wallPlf).epsilon(1e-6));
+}
+
+TEST_CASE("rafters are checked over their longest span at their spacing") {
+    Document d = Document::createDefault();
+    RoofPlane r;
+    r.levelId = d.levels[0].id;
+    r.pitch = 6;
+    r.a = {0, 0};
+    r.b = {480, 0};
+    r.outline = RoofPlane::rectangle(r.a, r.b, 168, 18);
+    r.rafterMemberId = "dfl-no2-1-2x6";
+    auto small = structural::checkRafters(d, r);
+    REQUIRE(small.checked);
+    CHECK(small.span == Approx(168));
+    CHECK_FALSE(small.result.passes);
+    r.rafterMemberId = "dfl-no2-1-2x12";
+    CHECK(structural::checkRafters(d, r).result.passes);
+    // Wider spacing carries more roof.
+    r.rafterSpacing = 24;
+    CHECK(structural::checkRafters(d, r).plf == Approx(small.plf * 1.5));
+    r.framing = RoofFraming::Trusses;
+    CHECK_FALSE(structural::checkRafters(d, r).checked);
+    CHECK(structural::rafterChoices().size() >= 20);
+}
+
+TEST_CASE("a gambrel's ceiling is counted once, under both of its planes") {
+    Document d = Document::createDefault();
+    d.wallTypes.clear();
+    const ObjectId level = d.levels[0].id;
+    const Vec2 pts[] = {{0, 0}, {480, 0}, {480, 336}, {0, 336}};
+    std::vector<ObjectId> ids;
+    for (int i = 0; i < 4; ++i) {
+        Wall w;
+        w.id = d.newId();
+        w.levelId = level;
+        w.a = pts[i];
+        w.b = pts[(i + 1) % 4];
+        d.walls.push_back(w);
+        ids.push_back(w.id);
+    }
+    for (int i : {0, 2}) {
+        d.wall(ids[i])->roof.pitch = 18;
+        d.wall(ids[i])->roof.upperPitch = 5;
+        d.wall(ids[i])->roof.upperStart = 84;
+    }
+    for (int i : {1, 3}) d.wall(ids[i])->roof.kind = WallRoof::FullGable;
+    REQUIRE(buildRoof(d, level) == 4);
+    double ceiling = 0;
+    for (const auto& s : runTakedown(d).supports)
+        for (const auto& l : s.lineLoads)
+            if (l.origin == LoadOrigin::Ceiling) ceiling += l.total()[LoadCase::Dead];
+    CHECK(ceiling == Approx(10.0 * 480 * 336 / 144.0).epsilon(0.01));
 }

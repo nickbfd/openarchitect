@@ -13,11 +13,15 @@ constexpr double kPointEps = 1e-4;
 
 // The skeleton is found by shrinking the outline: every edge moves inward
 // along its normal at its own speed, `t` being the height reached. Edge i's
-// line at height t is n·x = c + s·t.
+// line at height t is n·x = c + s·t. An edge that changes pitch partway up
+// gets a new line from that height on, with its own face.
 struct Line {
     Vec2 n;   // inward unit normal
     Vec2 dir; // direction of the original edge
     double c = 0, s = 0;
+    size_t edge = 0;   // the outline edge it came from
+    int phase = 0;     // 0 from the plate, 1 after the change of pitch
+    double start = 0;  // height it starts at
 };
 
 // A corner of the shrinking outline, where line `in` (the edge arriving)
@@ -31,8 +35,14 @@ struct Corner {
 };
 
 class Skeleton {
+    struct Change {
+        double height;
+        int line;
+        double speed;
+    };
+
 public:
-    Skeleton(const Polygon& outline, const std::vector<double>& speed) : faces_(outline.size()) {
+    Skeleton(const Polygon& outline, const std::vector<SkeletonEdge>& edges) : faces_(outline.size()) {
         const size_t n = outline.size();
         for (size_t i = 0; i < n; ++i) {
             const Vec2 a = outline[i], b = outline[(i + 1) % n];
@@ -40,10 +50,13 @@ public:
             l.dir = (b - a).normalized();
             l.n = l.dir.perp();
             l.c = dot(l.n, a);
-            l.s = speed[i];
+            l.s = edges[i].speed;
+            l.edge = i;
             lines_.push_back(l);
             faces_[i].push_back({a, b});
+            if (edges[i].changeHeight > kTimeEps) changes_.push_back({edges[i].changeHeight, static_cast<int>(i), edges[i].upperSpeed});
         }
+        std::sort(changes_.begin(), changes_.end(), [](const Change& x, const Change& y) { return x.height < y.height; });
         std::vector<int> ring;
         for (size_t i = 0; i < n; ++i) {
             const int in = static_cast<int>((i + n - 1) % n), out = static_cast<int>(i);
@@ -52,7 +65,7 @@ public:
         rings_.push_back(ring);
     }
 
-    std::vector<Polygon> run() {
+    std::vector<SkeletonFace> run() {
         const size_t limit = 50 * lines_.size() * lines_.size() + 100;
         for (size_t step = 0; step < limit && !rings_.empty(); ++step) {
             // Rings that have shrunk to nothing end here.
@@ -71,8 +84,9 @@ public:
                 rings_.clear();
             }
         }
-        std::vector<Polygon> out;
-        for (size_t i = 0; i < faces_.size(); ++i) out.push_back(assemble(i));
+        std::vector<SkeletonFace> out;
+        for (size_t i = 0; i < faces_.size(); ++i)
+            out.push_back({lines_[i].edge, lines_[i].phase, lines_[i].start, assemble(i)});
         return out;
     }
 
@@ -176,6 +190,15 @@ private:
                 }
             }
         }
+        // Edges changing pitch before anything else happens.
+        while (!changes_.empty() && changes_.front().height <= best + kTimeEps) {
+            const Change ch = changes_.front();
+            changes_.erase(changes_.begin());
+            if (ch.height < now_ - kTimeEps) continue;
+            now_ = std::max(now_, ch.height);
+            changePitch(ch);
+            return true;
+        }
         if (kind == 0) return false;
         now_ = best;
         if (kind == 1) edgeEvent(bestRing, bestIndex);
@@ -221,6 +244,34 @@ private:
         rings_.push_back(two);
     }
 
+    // Edge `ch.line` takes its new speed from here up. Each stretch of it
+    // still on the outline becomes a new line, with a face that starts
+    // along the stretch; the face below closes along it.
+    void changePitch(const Change& ch) {
+        for (auto& ring : rings_) {
+            const size_t m = ring.size();
+            for (size_t i = 0; i < m; ++i) {
+                if (corners_[ring[i]].out != ch.line) continue;
+                const size_t j = (i + 1) % m;
+                const int u = ring[i], w = ring[j];
+                const Vec2 pu = corners_[u].at(now_), pw = corners_[w].at(now_);
+                Line l = lines_[ch.line];
+                l.c += (l.s - ch.speed) * now_;
+                l.s = ch.speed;
+                l.phase = lines_[ch.line].phase + 1;
+                l.start = now_;
+                lines_.push_back(l);
+                const int nl = static_cast<int>(lines_.size() - 1);
+                faces_.push_back({{pu, pw}});
+                if (distance(pu, pw) > kPointEps) faces_[ch.line].push_back({pu, pw});
+                finish(u, pu);
+                finish(w, pw);
+                ring[i] = addCorner(pu, now_, corners_[u].in, nl);
+                ring[j] = addCorner(pw, now_, nl, corners_[w].out);
+            }
+        }
+    }
+
     // The face of edge i: its pieces chained into a loop from the edge's end
     // back to its start.
     Polygon assemble(size_t i) const {
@@ -262,6 +313,7 @@ private:
         return clean;
     }
 
+    std::vector<Change> changes_;
     std::vector<Line> lines_;
     std::vector<Corner> corners_;
     std::vector<std::vector<int>> rings_;
@@ -281,12 +333,16 @@ double wallPitch(const Document& doc, const Wall& w) {
 
 double wallOverhang(const Document& doc, const Wall& w) {
     if (w.roof.overhang >= 0.0) return w.roof.overhang;
-    return w.roof.kind == WallRoof::Sloped ? doc.roofDefaults.eaveOverhang : doc.roofDefaults.gableOverhang;
+    return w.roof.kind == WallRoof::Sloped || w.roof.kind == WallRoof::DutchGable ? doc.roofDefaults.eaveOverhang
+                                                                                 : doc.roofDefaults.gableOverhang;
 }
 
 bool sameRoof(const Document& doc, const Wall& a, const Wall& b) {
     return a.roof.kind == b.roof.kind && std::abs(wallPitch(doc, a) - wallPitch(doc, b)) < 1e-9 &&
-           std::abs(wallOverhang(doc, a) - wallOverhang(doc, b)) < 1e-9;
+           std::abs(wallOverhang(doc, a) - wallOverhang(doc, b)) < 1e-9 &&
+           a.roof.hasUpperPitch() == b.roof.hasUpperPitch() &&
+           (!a.roof.hasUpperPitch() || (a.roof.upperPitch == b.roof.upperPitch && a.roof.upperStart == b.roof.upperStart)) &&
+           (a.roof.kind != WallRoof::DutchGable || a.roof.upperStart == b.roof.upperStart);
 }
 
 std::optional<Vec2> intersect(Vec2 p, Vec2 d, Vec2 q, Vec2 e) {
@@ -297,7 +353,8 @@ std::optional<Vec2> intersect(Vec2 p, Vec2 d, Vec2 q, Vec2 e) {
 
 bool samePlane(const RoofPlane& x, const RoofPlane& y) {
     if (x.levelId != y.levelId || distance(x.a, y.a) > 1e-6 || distance(x.b, y.b) > 1e-6 ||
-        std::abs(x.pitch - y.pitch) > 1e-9 || x.outline.size() != y.outline.size() || x.highBearing != y.highBearing)
+        std::abs(x.pitch - y.pitch) > 1e-9 || std::abs(x.baseHeight - y.baseHeight) > 1e-6 ||
+        x.outline.size() != y.outline.size() || x.highBearing != y.highBearing)
         return false;
     for (size_t i = 0; i < x.outline.size(); ++i)
         if (distance(x.outline[i], y.outline[i]) > 1e-6) return false;
@@ -313,9 +370,18 @@ std::vector<RoofPlane> automaticPlanes(const Document& doc, ObjectId levelId) {
 
 } // namespace
 
+std::vector<SkeletonFace> skeletonFaces(const Polygon& outline, const std::vector<SkeletonEdge>& edges) {
+    if (outline.size() < 3 || edges.size() != outline.size() || signedArea(outline) <= 0) return {};
+    return Skeleton(outline, edges).run();
+}
+
 std::vector<Polygon> skeletonFaces(const Polygon& outline, const std::vector<double>& speed) {
-    if (outline.size() < 3 || speed.size() != outline.size() || signedArea(outline) <= 0) return {};
-    return Skeleton(outline, speed).run();
+    if (speed.size() != outline.size()) return {};
+    std::vector<SkeletonEdge> edges;
+    for (double v : speed) edges.push_back({v, -1.0, 0.0});
+    std::vector<Polygon> out;
+    for (auto& f : skeletonFaces(outline, edges)) out.push_back(std::move(f.outline));
+    return out;
 }
 
 std::vector<LoopEdge> exteriorWallLoop(const Document& doc, ObjectId levelId) {
@@ -408,17 +474,28 @@ std::vector<RoofPlane> buildRoofPlanes(const Document& doc, ObjectId levelId) {
     if (loop.empty()) return {};
     const size_t n = loop.size();
     Polygon outline;
-    std::vector<double> speed, overhang;
+    std::vector<SkeletonEdge> edges;
+    std::vector<double> overhang;
     std::vector<const Wall*> walls;
     for (const auto& e : loop) {
         const Wall* w = doc.wall(e.wallId);
         walls.push_back(w);
         outline.push_back(e.a);
-        speed.push_back(w->roof.kind == WallRoof::Sloped ? 12.0 / std::max(wallPitch(doc, *w), 0.25) : 0.0);
+        SkeletonEdge se;
+        const bool sloped = w->roof.kind == WallRoof::Sloped || w->roof.kind == WallRoof::DutchGable;
+        se.speed = sloped ? 12.0 / std::max(wallPitch(doc, *w), 0.25) : 0.0;
+        if (w->roof.kind == WallRoof::DutchGable) {
+            se.changeHeight = std::max(w->roof.upperStart, 1.0);
+            se.upperSpeed = 0.0;
+        } else if (w->roof.hasUpperPitch()) {
+            se.changeHeight = std::max(w->roof.upperStart, 1.0);
+            se.upperSpeed = 12.0 / std::max(w->roof.upperPitch, 0.25);
+        }
+        edges.push_back(se);
         overhang.push_back(wallOverhang(doc, *w));
     }
-    const auto faces = skeletonFaces(outline, speed);
-    if (faces.size() != n) return {};
+    const auto faces = skeletonFaces(outline, edges);
+    if (faces.size() < n) return {};
 
     // Corners of the roof's edge: where the overhangs of neighboring walls meet.
     auto edgeDir = [&](size_t i) { return (outline[(i + 1) % n] - outline[i]).normalized(); };
@@ -429,46 +506,97 @@ std::vector<RoofPlane> buildRoofPlanes(const Document& doc, ObjectId levelId) {
         const Vec2 ph = outline[i] - dh.perp() * overhang[h], pi = outline[i] - di.perp() * overhang[i];
         eaveCorner[i] = intersect(ph, dh, pi, di).value_or(pi);
     }
-    auto onEdge = [&](Vec2 p, size_t g) {
-        const Vec2 a = outline[g], d = edgeDir(g);
-        const double along = dot(p - a, d), len = distance(a, outline[(g + 1) % n]);
+
+    // Where the roof goes up vertically: gable and high shed walls, and the
+    // gable of a Dutch gable, which stands back from its wall as far as the
+    // hip below it reaches.
+    struct Vertical {
+        size_t edge;
+        int phase;
+        double inset;    // inches inside the wall line
+        double overhang; // how far the roof edge goes out past it
+    };
+    std::vector<Vertical> verticals;
+    for (size_t g = 0; g < n; ++g) {
+        if (edges[g].speed <= 0.0) verticals.push_back({g, 0, 0.0, overhang[g]});
+        else if (edges[g].changeHeight > 0.0 && edges[g].upperSpeed <= 0.0) {
+            const double inset = edges[g].speed * edges[g].changeHeight;
+            verticals.push_back({g, 1, inset, std::min(doc.roofDefaults.gableOverhang, inset)});
+        }
+    }
+    auto onVertical = [&](Vec2 p, const Vertical& v) {
+        const Vec2 d = edgeDir(v.edge), a = outline[v.edge] + d.perp() * v.inset;
+        const double along = dot(p - a, d), len = distance(outline[v.edge], outline[(v.edge + 1) % n]);
         return std::abs(cross(d, p - a)) < 1e-3 && along > -1e-3 && along < len + 1e-3;
     };
+    auto onEdge = [&](Vec2 p, size_t g) { return onVertical(p, {g, 0, 0.0, 0.0}); };
 
     std::vector<RoofPlane> planes;
-    for (size_t i = 0; i < n; ++i) {
-        if (speed[i] <= 0.0 || faces[i].size() < 3) continue;
+    for (const auto& face : faces) {
+        const size_t i = face.edge;
+        const double speed = face.phase == 0 ? edges[i].speed : edges[i].upperSpeed;
+        if (speed <= 0.0 || face.outline.size() < 3) continue;
+        const Polygon& poly = face.outline;
         RoofPlane r;
         r.levelId = levelId;
         r.a = outline[i];
         r.b = outline[(i + 1) % n];
-        r.pitch = wallPitch(doc, *walls[i]);
+        r.pitch = face.phase == 0 ? wallPitch(doc, *walls[i]) : walls[i]->roof.upperPitch;
+        // An upper plane starts at the break: its height there, carried
+        // back down its slope to the wall line.
+        r.baseHeight = face.phase == 0 ? 0.0 : face.startHeight * (1.0 - edges[i].speed / speed);
         r.overhang = overhang[i];
         r.framing = doc.roofDefaults.framing;
         r.hasCeiling = doc.roofDefaults.ceiling;
+        r.rafterMemberId = doc.roofDefaults.rafterMemberId;
+        r.rafterSpacing = doc.roofDefaults.rafterSpacing;
+        r.heelHeight = doc.roofDefaults.heelHeight;
+        r.sheathingThickness = doc.roofDefaults.sheathingThickness;
+        r.sheathingMaterial = doc.roofDefaults.sheathingMaterial;
         r.highBearing = false;
         r.automatic = true;
         // Carry the face out to the edge of the roof: its corners on the
-        // walls go to the overhang corners, and points on gable and shed
-        // walls move out past them by their rake overhang.
-        for (size_t k = 0; k < faces[i].size(); ++k) {
-            const Vec2 p = faces[i][k];
+        // walls go to the overhang corners, and its edges up gables move out
+        // by their rake overhang. Where a rake starts or ends, the edge
+        // arriving at it (a ridge, a hip, a break) runs on out to the rake.
+        const size_t m = poly.size();
+        for (size_t k = 0; k < m; ++k) {
+            const Vec2 p = poly[k];
             Vec2 q = p;
             bool corner = false;
-            for (size_t j = 0; j < n; ++j)
+            for (size_t j = 0; j < n && face.phase == 0; ++j)
                 if (distance(p, outline[j]) < 1e-3) {
                     q = eaveCorner[j];
                     corner = true;
                     break;
                 }
             if (!corner)
-                for (size_t g = 0; g < n; ++g)
-                    if (speed[g] <= 0.0 && onEdge(p, g)) q = q - edgeDir(g).perp() * overhang[g];
+                for (const auto& v : verticals) {
+                    if (!onVertical(p, v) || (v.edge == i && face.phase < v.phase)) continue;
+                    const Vec2 out = -edgeDir(v.edge).perp() * v.overhang;
+                    const Vec2 prev = poly[(k + m - 1) % m], next = poly[(k + 1) % m];
+                    const bool prevOn = onVertical(prev, v), nextOn = onVertical(next, v);
+                    if (prevOn != nextOn) {
+                        const Vec2 from = prevOn ? next : prev;
+                        q = intersect(p, p - from, p + out, edgeDir(v.edge)).value_or(q + out);
+                    } else {
+                        q = q + out;
+                    }
+                }
             r.outline.push_back(q);
         }
+        // Drop points left in a straight line with their neighbors.
+        for (size_t k = 0; k < r.outline.size() && r.outline.size() > 3;) {
+            const size_t c = r.outline.size();
+            const Vec2 prev = r.outline[(k + c - 1) % c], p = r.outline[k], next = r.outline[(k + 1) % c];
+            if (distance(prev, p) < 1e-6 || std::abs(cross((p - prev).normalized(), (next - p).normalized())) < 1e-9)
+                r.outline.erase(r.outline.begin() + static_cast<long>(k));
+            else
+                ++k;
+        }
         // A shed's high side bears on its wall.
-        for (size_t k = 0; k < faces[i].size() && !r.highBearing; ++k) {
-            const Vec2 p = faces[i][k], q = faces[i][(k + 1) % faces[i].size()];
+        for (size_t k = 0; k < m && !r.highBearing && face.phase == 0; ++k) {
+            const Vec2 p = poly[k], q = poly[(k + 1) % m];
             if (distance(p, q) < 1.0) continue;
             for (size_t g = 0; g < n; ++g)
                 if (g != i && walls[g]->roof.kind == WallRoof::HighShed && onEdge(p, g) && onEdge(q, g))
@@ -479,17 +607,59 @@ std::vector<RoofPlane> buildRoofPlanes(const Document& doc, ObjectId levelId) {
     return planes;
 }
 
-int buildRoof(Document& doc, ObjectId levelId) {
+int buildRoof(Document& doc, ObjectId levelId, bool keepSettings) {
     auto planes = buildRoofPlanes(doc, levelId);
     if (planes.empty()) return 0;
-    std::vector<ObjectId> ids;
+    std::vector<RoofPlane> old;
     for (const auto& r : doc.roofPlanes)
-        if (r.automatic && r.levelId == levelId) ids.push_back(r.id);
+        if (r.automatic && r.levelId == levelId) old.push_back(r);
     std::erase_if(doc.roofPlanes, [&](const RoofPlane& r) { return r.automatic && r.levelId == levelId; });
+    // Each new plane takes the id of the old one over the same wall, or the
+    // next one left over, and with it the settings it was given.
+    std::vector<bool> used(old.size(), false);
+    std::vector<int> from(planes.size(), -1);
+    for (size_t k = 0; k < planes.size(); ++k)
+        for (size_t j = 0; j < old.size(); ++j)
+            if (!used[j] && distance(old[j].a, planes[k].a) < 1e-6 && distance(old[j].b, planes[k].b) < 1e-6 &&
+                std::abs(old[j].baseHeight - planes[k].baseHeight) < 1e-6) {
+                used[j] = true;
+                from[k] = static_cast<int>(j);
+                break;
+            }
+    size_t next = 0;
     for (size_t k = 0; k < planes.size(); ++k) {
-        planes[k].id = k < ids.size() ? ids[k] : doc.newId();
-        doc.roofPlanes.push_back(planes[k]);
+        if (from[k] < 0) {
+            while (next < old.size() && used[next]) ++next;
+            if (next < old.size()) {
+                used[next] = true;
+                from[k] = static_cast<int>(next);
+            }
+        }
+        RoofPlane& r = planes[k];
+        if (from[k] >= 0) {
+            const RoofPlane& was = old[static_cast<size_t>(from[k])];
+            r.id = was.id;
+            if (keepSettings) {
+                // Pitch and overhang come from the walls; the rest stays as set on the plane.
+                const double pitch = r.pitch, overhang = r.overhang;
+                static_cast<RoofSettings&>(r) = was;
+                r.pitch = pitch;
+                r.overhang = overhang;
+            }
+        } else {
+            r.id = doc.newId();
+        }
     }
+    // Keep the order planes were in, new ones after.
+    std::stable_sort(planes.begin(), planes.end(), [&](const RoofPlane& x, const RoofPlane& y) {
+        auto rank = [&](const RoofPlane& r) {
+            for (size_t j = 0; j < old.size(); ++j)
+                if (old[j].id == r.id) return j;
+            return old.size();
+        };
+        return rank(x) < rank(y);
+    });
+    for (auto& r : planes) doc.roofPlanes.push_back(r);
     return static_cast<int>(planes.size());
 }
 
@@ -497,7 +667,7 @@ void rebuildAutomaticRoofs(Document& doc) {
     std::set<ObjectId> levels;
     for (const auto& r : doc.roofPlanes)
         if (r.automatic) levels.insert(r.levelId);
-    for (ObjectId l : levels) buildRoof(doc, l);
+    for (ObjectId l : levels) buildRoof(doc, l, true);
 }
 
 bool roofEditedByHand(const Document& before, const Document& after) {

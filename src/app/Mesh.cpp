@@ -1,6 +1,7 @@
 #include "Mesh.h"
 
 #include "oa/core/dimensions.h"
+#include "oa/core/roof_builder.h"
 #include "oa/core/terrain.h"
 #include "oa/structural/members.h"
 #include "oa/structural/posts.h"
@@ -173,36 +174,109 @@ void addBeam(Builder& b, const Document& doc, const Beam& beam) {
     b.box(beam.a, (beam.b - beam.a).normalized(), beam.length(), width, top - depth, top, kBeam);
 }
 
-// The roof surface sits on the rafters, this far above the wall plate.
-constexpr double kHeel = 8.0;
+// A line the roof stands up from vertically, like a wall top under a gable
+// or the top of the little hip under a Dutch gable, at a height.
+struct GableBase {
+    Segment line;
+    double z;
+};
+
+// Where the roof surface meets the line of the wall or beam under a plane:
+// walls go up to it, and a Dutch gable's gable stands on its hip.
+std::vector<GableBase> gableBases(const Document& doc, const RoofPlane& r) {
+    std::vector<GableBase> out;
+    const double wallTop = plateHeight(doc, r.levelId);
+    for (const auto& w : doc.walls)
+        if (w.levelId == r.levelId && !w.roomDivider) out.push_back({w.centerline(), wallTop});
+    for (const auto& e : exteriorWallLoop(doc, r.levelId)) {
+        const Wall* w = doc.wall(e.wallId);
+        if (!w || w->roof.kind != WallRoof::DutchGable) continue;
+        const double pitch = w->roof.pitch > 0 ? w->roof.pitch : doc.roofDefaults.pitch;
+        const double h = std::max(w->roof.upperStart, 1.0);
+        const Vec2 in = (e.b - e.a).normalized().perp() * (12.0 / std::max(pitch, 0.25) * h);
+        out.push_back({{e.a + in, e.b + in}, wallTop + h});
+    }
+    return out;
+}
 
 void addRoofPlane(Builder& b, const Document& doc, const RoofPlane& r) {
     const Level* level = doc.level(r.levelId);
     if (!level || r.outline.size() < 3 || distance(r.a, r.b) < 1.0) return;
     const double slope = r.pitch / 12.0;
     const double wallTop = plateHeight(doc, r.levelId);
-    auto surface = [&](Vec2 p) { return Vec3{p.x, p.y, wallTop + kHeel + r.riseAt(p)}; };
+    const double lift = r.surfaceAbovePlate();
+    auto surface = [&](Vec2 p) { return Vec3{p.x, p.y, wallTop + lift + r.riseAt(p)}; };
 
     for (const auto& t : triangulate(r.outline))
         b.triangle(surface(r.outline[t[0]]), surface(r.outline[t[1]]), surface(r.outline[t[2]]), kRoof);
 
-    // Close the gap between the walls under the plane and its underside: the
-    // band over the eave wall, the gable triangles at the rakes, and the
-    // wall under a shed roof's high side.
+    // Close the gap between what stands under the plane and its underside:
+    // the band over the eave wall, the gable triangles at the rakes, the
+    // wall under a shed roof's high side, and a Dutch gable over its hip.
     if (slope < 1e-6) return;
-    const double lowest = -kHeel / slope; // uphill distance where the surface meets the wall top
-    for (const auto& w : doc.walls) {
-        if (w.levelId != r.levelId || w.roomDivider) continue;
-        for (auto [t0, t1] : clipToPolygon(w.centerline(), r.outline)) {
-            const Vec2 q0 = lerp(w.a, w.b, t0), q1 = lerp(w.a, w.b, t1);
-            const double s0 = r.upFrom(q0), s1 = r.upFrom(q1);
-            if (s0 < lowest && s1 < lowest) continue;
+    for (const auto& base : gableBases(doc, r)) {
+        for (auto [t0, t1] : clipToPolygon(base.line, r.outline)) {
+            const Vec2 q0 = lerp(base.line.a, base.line.b, t0), q1 = lerp(base.line.a, base.line.b, t1);
+            const double g0 = surface(q0).z - base.z, g1 = surface(q1).z - base.z;
+            if (g0 <= 1e-6 && g1 <= 1e-6) continue;
             Vec2 p0 = q0, p1 = q1;
-            if (s0 < lowest) p0 = lerp(q0, q1, (lowest - s0) / (s1 - s0));
-            if (s1 < lowest) p1 = lerp(q0, q1, (lowest - s0) / (s1 - s0));
-            b.quad({p0.x, p0.y, wallTop}, {p1.x, p1.y, wallTop}, surface(p1), surface(p0), kGable);
+            if (g0 < 0) p0 = lerp(q0, q1, g0 / (g0 - g1));
+            if (g1 < 0) p1 = lerp(q0, q1, g0 / (g0 - g1));
+            b.quad({p0.x, p0.y, base.z}, {p1.x, p1.y, base.z}, surface(p1), surface(p0), kGable);
         }
     }
+}
+
+// The rafters (or truss top chords) of a plane on their spacing, each cut
+// to the outline, sitting the heel height above the plate at the bearing line.
+void addRoofFraming(Builder& b, const Document& doc, const RoofPlane& r) {
+    const Level* level = doc.level(r.levelId);
+    if (!level || r.outline.size() < 3 || distance(r.a, r.b) < 1.0) return;
+    const double cosA = std::cos(r.slopeRadians());
+    const double plumb = r.rafterDepth() / cosA;
+    double width = 1.5;
+    if (const auto* m = structural::findMember(r.rafterMemberId); m && r.framing == RoofFraming::Rafters) width = m->b;
+    const double top = plateHeight(doc, r.levelId) + r.effectiveHeel();
+    const Vec2 along = r.along(), up = r.upslope();
+    const Polygon& poly = r.outline;
+    double t0 = 1e30, t1 = -1e30;
+    for (Vec2 p : poly) {
+        t0 = std::min(t0, r.alongFrom(p));
+        t1 = std::max(t1, r.alongFrom(p));
+    }
+    const double spacing = std::max(r.rafterSpacing, 6.0);
+    auto rafterAt = [&](double t) {
+        // Where the line up the slope at t crosses the outline, in pairs.
+        std::vector<double> cuts;
+        for (size_t k = 0; k < poly.size(); ++k) {
+            const Vec2 p = poly[k], q = poly[(k + 1) % poly.size()];
+            const double tp = r.alongFrom(p), tq = r.alongFrom(q);
+            if ((tp <= t && tq > t) || (tq <= t && tp > t)) {
+                const double f = (t - tp) / (tq - tp);
+                cuts.push_back(r.upFrom(p) + (r.upFrom(q) - r.upFrom(p)) * f);
+            }
+        }
+        std::sort(cuts.begin(), cuts.end());
+        for (size_t k = 0; k + 1 < cuts.size(); k += 2) {
+            const double lo = cuts[k], hi = cuts[k + 1];
+            if (hi - lo < 1.0) continue;
+            const Vec2 base = r.a + along * t;
+            const Vec2 side = along * (width / 2.0);
+            const Vec2 pl = base + up * lo, ph = base + up * hi;
+            const double zl = top + r.riseAt(pl), zh = top + r.riseAt(ph);
+            const Vec3 A{pl.x - side.x, pl.y - side.y, zl}, B{pl.x + side.x, pl.y + side.y, zl};
+            const Vec3 C{ph.x + side.x, ph.y + side.y, zh}, D{ph.x - side.x, ph.y - side.y, zh};
+            auto down = [&](Vec3 v) { return Vec3{v.x, v.y, v.z - plumb}; };
+            b.quad(A, B, C, D, kLumber);
+            b.quad(down(B), down(A), down(D), down(C), kLumber);
+            b.quad(down(A), down(B), B, A, kLumber);
+            b.quad(down(C), down(D), D, C, kLumber);
+            b.quad(down(D), down(A), A, D, kLumber);
+            b.quad(down(B), down(C), C, B, kLumber);
+        }
+    };
+    for (double t = t0 + width / 2.0; t < t1 - width / 2.0 + 1e-6; t += spacing) rafterAt(t);
+    rafterAt(t1 - width / 2.0);
 }
 
 void addPost(Builder& b, const Document& doc, const Post& post) {
@@ -311,7 +385,8 @@ void addRoof(Builder& b, const Document& doc, const Roof& roof) {
 
     const double slope = roof.pitch / 12.0;
     const double o = roof.overhang;
-    const double plate = level->elevation + level->wallHeight + kHeel;
+    const double heel = roof.surfaceAbovePlate();
+    const double plate = level->elevation + level->wallHeight + heel;
     const double vc = (v0 + v1) / 2.0;
     const double run = (v1 - v0) / 2.0;
     const double ridgeZ = plate + run * slope;
@@ -321,7 +396,7 @@ void addRoof(Builder& b, const Document& doc, const Roof& roof) {
     if (roof.style == RoofStyle::Gable) {
         b.quad(P(u0 - o, v0 - o, eaveZ), P(u1 + o, v0 - o, eaveZ), P(u1 + o, vc, ridgeZ), P(u0 - o, vc, ridgeZ), kRoof);
         b.quad(P(u1 + o, v1 + o, eaveZ), P(u0 - o, v1 + o, eaveZ), P(u0 - o, vc, ridgeZ), P(u1 + o, vc, ridgeZ), kRoof);
-        const double wallTop = plate - kHeel;
+        const double wallTop = plate - heel;
         b.quad(P(u0, v1, wallTop), P(u0, v0, wallTop), P(u0, v0, plate), P(u0, v1, plate), kGable);
         b.quad(P(u1, v0, wallTop), P(u1, v1, wallTop), P(u1, v1, plate), P(u1, v0, plate), kGable);
         b.triangle(P(u0, v1, plate), P(u0, v0, plate), P(u0, vc, ridgeZ), kGable);
@@ -371,7 +446,8 @@ Mesh buildMesh(const Document& doc, const std::vector<ObjectId>& selected, bool 
     }
     for (const auto& r : doc.roofPlanes) {
         b.owner = r.id;
-        addRoofPlane(b, doc, r);
+        if (framing) addRoofFraming(b, doc, r);
+        else addRoofPlane(b, doc, r);
     }
     return b.mesh;
 }

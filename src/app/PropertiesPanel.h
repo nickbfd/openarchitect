@@ -53,6 +53,7 @@ private:
     void showRoof(const oa::Roof& r);
     void showRoofPlane(const oa::RoofPlane& p);
     void showRoofSettings(oa::ObjectId id, const oa::RoofSettings& r, bool plane = false);
+    void showRoofFraming(oa::ObjectId id, const oa::RoofSettings& r, bool plane);
     void showPost(const oa::Post& p);
     void showWallRoof(const oa::Wall& w);
     void showWallType(const oa::Wall& w, const oa::WallType& t);

@@ -61,13 +61,21 @@ std::vector<WallType> defaultWallTypes();
 // What an exterior wall tells the roof builder, like the Roof panel of
 // Chief's wall specification. A sloped wall gets a roof plane rising from
 // it; a full gable wall goes up vertically to the ridge instead; a high
-// shed wall is the top of a shed roof.
-enum class WallRoof { Sloped, FullGable, HighShed };
+// shed wall is the top of a shed roof. A Dutch gable wall starts sloped and
+// turns into a gable at `upperStart`.
+enum class WallRoof { Sloped, FullGable, HighShed, DutchGable };
 
 struct WallRoofSettings {
     WallRoof kind = WallRoof::Sloped;
     double pitch = 0.0;     // rise in 12; 0 uses the Build Roof pitch
     double overhang = -1.0; // inches; negative uses the Build Roof eave or gable overhang
+    // A second pitch above `upperStart` inches over the plate: a gambrel
+    // (steep, then shallow), a gull wing (shallow, then steep), a mansard on
+    // every wall, or a half hip over a full gable wall. 0 has no upper pitch.
+    double upperPitch = 0.0;
+    double upperStart = 48.0; // inches above the top of the wall plate; also where a Dutch gable starts
+
+    bool hasUpperPitch() const { return upperPitch > 0.0 && kind != WallRoof::HighShed && kind != WallRoof::DutchGable; }
 };
 
 struct Wall {
@@ -182,9 +190,33 @@ struct RoofSettings {
     double atticLivePsf = 10.0;  // IRC: 10 psf uninhabitable attic without storage
     bool customSnow = false;     // use snowPsf instead of the snow calculated from the site
     double snowPsf = 0.0;        // balanced roof snow on the horizontal projection, psf
+    // Framing, like the Framing panel of Chief's roof plane specification.
+    // Rafters are a catalog member; trusses are engineered by their maker,
+    // so only their spacing and heel are set here.
+    std::string rafterMemberId = "dfl-no2-1-2x8";
+    double rafterSpacing = 16.0;     // on center, inches; trusses too
+    double heelHeight = 0.0;         // inches from the top of the plate to the top of the framing at
+                                     // the bearing line, measured plumb; 0 works it out from the framing
+    double sheathingThickness = 0.4375; // inches (7/16")
+    std::string sheathingMaterial = "OSB";
 
     double slopeRadians() const { return std::atan(pitch / 12.0); }
+    // Actual depth of the rafters (or the truss top chord, a 2x4).
+    double rafterDepth() const;
+    // The heel height in use: the one set, or for rafters what's left of
+    // the rafter above a birdsmouth cut a third of its depth deep, and for
+    // trusses a standard heel (a 2x4 bottom chord under a 2x4 top chord).
+    double effectiveHeel() const;
+    // Height of the roof surface (top of the sheathing) above the plate at
+    // the bearing line.
+    double surfaceAbovePlate() const;
 };
+
+// Actual depth of a sawn lumber member from its catalog id or name, like
+// "dfl-no2-1-2x8" or "2x8" (7.25"). 0 when the name isn't 2x, 3x, 4x or 6x lumber.
+double sawnLumberDepth(const std::string& memberId);
+// "2x8" from a catalog id like "dfl-no2-2-2x8"; the id itself otherwise.
+std::string lumberSize(const std::string& memberId);
 
 // A rectangular gable or hip roof bearing on the walls of `levelId`. The
 // footprint is measured to the bearing lines (wall centerlines); overhang
@@ -218,6 +250,10 @@ struct RoofPlane : RoofSettings {
     bool highBearing = true;
     double run = 0.0; // only read from older files that had no outline
     bool automatic = false; // made by Build Roof from the walls, replaced when it runs again
+    // Height of the plane above the plate at its baseline. The upper planes
+    // of a gambrel or a half hip are measured from their wall too, but start
+    // above it: the surface reaches the break at `baseHeight + upFrom * pitch / 12`.
+    double baseHeight = 0.0;
 
     RoofPlane() {
         pitch = 3.0;
@@ -230,8 +266,8 @@ struct RoofPlane : RoofSettings {
     double upFrom(Vec2 p) const { return dot(p - a, upslope()); }
     // Distance along the baseline from `a`.
     double alongFrom(Vec2 p) const { return dot(p - a, along()); }
-    // Height of the roof surface above the plate line at a plan point.
-    double riseAt(Vec2 p) const { return upFrom(p) * pitch / 12.0; }
+    // Height of the roof plane above the plate line at a plan point.
+    double riseAt(Vec2 p) const { return baseHeight + upFrom(p) * pitch / 12.0; }
     // The outline's extent across the slope, measured along the baseline.
     double width() const;
     // Farthest the outline reaches uphill, and downhill past the baseline.
@@ -282,6 +318,11 @@ struct RoofDefaults {
     RoofFraming framing = RoofFraming::Rafters;
     bool ceiling = true;          // a flat ceiling under the roof, hung from the rafters or truss chords
     bool autoRebuild = false;     // rebuild the automatic roof after every change
+    std::string rafterMemberId = "dfl-no2-1-2x8";
+    double rafterSpacing = 16.0;
+    double heelHeight = 0.0;      // 0: worked out from the framing
+    double sheathingThickness = 0.4375;
+    std::string sheathingMaterial = "OSB";
 };
 
 struct Document {
