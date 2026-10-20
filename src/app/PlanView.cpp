@@ -3,13 +3,19 @@
 #include "Workspace.h"
 
 #include "oa/core/dimensions.h"
+#include "oa/core/editing.h"
 #include "oa/core/terrain.h"
 #include "oa/core/units.h"
 #include "oa/structural/members.h"
 #include "oa/structural/posts.h"
 
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QEvent>
+#include <QFormLayout>
 #include <QKeyEvent>
+#include <QLineEdit>
 #include <QLineF>
 #include <QMenu>
 #include <QMouseEvent>
@@ -52,6 +58,33 @@ void drawAlong(QPainter& g, QPointF at, QPointF dir, const QString& text, double
     g.drawText(box, Qt::AlignCenter, text);
     g.restore();
 }
+
+// The screen box drawAlong puts its text in, for clicking on it.
+QRectF alongRect(QPointF at, QPointF dir, double lift) {
+    double rad = std::atan2(dir.y(), dir.x());
+    if (rad > kPi / 2) rad -= kPi;
+    if (rad <= -kPi / 2) rad += kPi;
+    const QPointF center = at + QPointF(std::sin(rad), -std::cos(rad)) * (lift + 8);
+    const double c = std::abs(std::cos(rad)), s = std::abs(std::sin(rad));
+    const double w = 84 * c + 18 * s, h = 18 * c + 84 * s;
+    return {center.x() - w / 2, center.y() - h / 2, w, h};
+}
+
+// Typing a value: Enter applies it, Escape puts it away.
+class ValueEdit : public QLineEdit {
+public:
+    using QLineEdit::QLineEdit;
+
+protected:
+    void keyPressEvent(QKeyEvent* e) override {
+        if (e->key() == Qt::Key_Escape) {
+            hide();
+            if (parentWidget()) parentWidget()->setFocus();
+            return;
+        }
+        QLineEdit::keyPressEvent(e);
+    }
+};
 
 QColor roomColor(RoomType t) {
     switch (t) {
@@ -131,12 +164,64 @@ void moveObjects(Document& d, const std::vector<ObjectId>& ids, Vec2 delta) {
     }
 }
 
+bool wallIsJoined(const Document& d, const Wall& w) {
+    for (const auto& v : d.walls)
+        if (v.id != w.id && v.levelId == w.levelId)
+            for (Vec2 end : {v.a, v.b})
+                if (distance(end, w.a) <= 0.5 || distance(end, w.b) <= 0.5) return true;
+    return false;
+}
+
+// Moves the selection the way Chief does: one wall joined to others slides
+// square to itself and the walls at its ends stretch to follow; one opening
+// slides along its wall; anything else moves as it is.
+void shiftObjects(Document& d, const std::vector<ObjectId>& ids, Vec2 delta) {
+    if (ids.size() == 1) {
+        if (const Wall* w = d.wall(ids.front())) {
+            if (wallIsJoined(d, *w) && w->length() > 1e-9) {
+                const Vec2 n = (w->b - w->a).normalized().perp();
+                delta = n * dot(delta, n);
+            }
+            setWallEnds(d, w->id, w->a + delta, w->b + delta);
+            return;
+        }
+        if (Opening* o = d.opening(ids.front())) {
+            if (const Wall* w = d.wall(o->wallId); w && w->length() > o->width)
+                o->offset = std::clamp(o->offset + dot(delta, (w->b - w->a).normalized()), o->width / 2,
+                                       w->length() - o->width / 2);
+            return;
+        }
+    }
+    moveObjects(d, ids, delta);
+}
+
+// How far an object is from a point, for choosing which end of a dimension
+// it sits at.
+double distanceToObject(const Document& d, ObjectId id, Vec2 p) {
+    if (const Wall* w = d.wall(id)) return w->centerline().distanceTo(p);
+    if (const Beam* b = d.beam(id)) return b->centerline().distanceTo(p);
+    if (const Opening* o = d.opening(id))
+        if (const Wall* w = d.wall(o->wallId)) return distance(w->a + (w->b - w->a).normalized() * o->offset, p);
+    if (const Post* q = d.post(id)) return distance(q->position, p);
+    if (const ElevationPoint* e = d.elevationPoint(id)) return distance(e->position, p);
+    if (const RoofPlane* r = d.roofPlane(id)) return r->outline.empty() ? 1e30 : distance(centroid(r->outline), p);
+    return 1e30;
+}
+
 } // namespace
 
 PlanView::PlanView(Workspace* ws, QWidget* parent) : QWidget(parent), ws_(ws) {
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setAutoFillBackground(false);
+    valueEdit_ = new ValueEdit(this);
+    valueEdit_->hide();
+    valueEdit_->setAlignment(Qt::AlignCenter);
+    valueEdit_->setToolTip("Type a length, like 12' 6\" or 150, then Enter");
+    connect(valueEdit_, &QLineEdit::returnPressed, this, &PlanView::commitValue);
+    connect(valueEdit_, &QLineEdit::editingFinished, this, [this] {
+        if (!valueEdit_->hasFocus()) valueEdit_->hide();
+    });
     connect(ws_, &Workspace::documentChanged, this, [this] {
         dimensionSnapsValid_ = false;
         update();
@@ -161,6 +246,8 @@ const Document& PlanView::doc() const { return preview_ ? *preview_ : ws_->doc()
 
 void PlanView::setTool(Tool tool) {
     tool_ = tool;
+    valueEdit_->hide();
+    editing_.reset();
     anchor_.reset();
     anchor2_.reset();
     joinEdge_.reset();
@@ -169,9 +256,10 @@ void PlanView::setTool(Tool tool) {
     setCursor(tool == Tool::Select ? Qt::ArrowCursor : Qt::CrossCursor);
     emit toolChanged(tool);
     static const char* hints[] = {
-        "Click to select; click the same spot again, press Tab or right-click to pick an object underneath. "
-        "Drag to move; drag a wall end to stretch it, or a roof plane's corner or edge handle to reshape it.",
-        "Click to start a wall, click again to end it. Keep clicking to chain walls; right-click or Esc to stop. Ctrl turns off snapping.",
+        "Click to select; click again, Tab or right-click picks what's underneath. Drag to move; joined walls stretch. "
+        "Click a dimension number to type a new one. Arrows nudge 1\" (Shift 1'). Double-click or Ctrl+E for properties.",
+        "Click to start a wall, click again to end it. Keep clicking to chain walls; right-click or Esc to stop. "
+        "Type a length and Enter, or Tab for length and angle. Ctrl turns off snapping. Space goes back to Select.",
         "Click on a wall to place a door.",
         "Click on a wall to place a window.",
         "Click the two ends of a beam. It carries what sits on it from the level above.",
@@ -569,6 +657,7 @@ void PlanView::paintEvent(QPaintEvent*) {
     }
     QPainter g(this);
     g.fillRect(rect(), Qt::white);
+    valueHits_.clear();
     g.setRenderHint(QPainter::Antialiasing);
 
     drawGrid(g);
@@ -583,6 +672,7 @@ void PlanView::paintEvent(QPaintEvent*) {
     drawRoofPlanes(g);
     drawPosts(g);
     drawDimensions(g);
+    drawTemporaryDimensions(g);
     if (showLoads_) drawLoads(g);
     drawToolPreview(g);
     drawTyped(g);
@@ -730,7 +820,14 @@ void PlanView::drawWalls(QPainter& g) const {
         g.drawPolygon(poly);
         if (!single) continue;
         for (Vec2 end : {w->a, w->b}) g.drawEllipse(toScreen(end), 4, 4);
-        drawLengthLabel(g, w->a + n * 4.0, w->b + n * 4.0);
+        const QRectF label = drawLengthLabel(g, w->a + n * 4.0, w->b + n * 4.0);
+        if (tool_ == Tool::Select) {
+            const ObjectId wallId = w->id;
+            Workspace* ws = ws_;
+            addValueHit(label, w->length(), "Change wall length", [wallId, ws](Document& doc, double v) {
+                if (v >= 1.0) setWallLength(doc, wallId, v, ws->wallLengthAnchor());
+            });
+        }
     }
 }
 
@@ -928,11 +1025,11 @@ void PlanView::drawPosts(QPainter& g) const {
     }
 }
 
-void PlanView::drawDimension(QPainter& g, Vec2 a, Vec2 b, double offset, bool selected) const {
-    if (distance(a, b) < 1e-6) return;
+QRectF PlanView::drawDimension(QPainter& g, Vec2 a, Vec2 b, double offset, bool selected, bool temporary) const {
+    if (distance(a, b) < 1e-6) return {};
     const Vec2 dir = (b - a).normalized(), n = dir.perp();
     const Vec2 da = a + n * offset, db = b + n * offset;
-    const QColor color = selected ? QColor(30, 110, 220) : QColor(50, 50, 50);
+    const QColor color = temporary ? QColor(0, 128, 110) : selected ? QColor(30, 110, 220) : QColor(50, 50, 50);
     g.setPen(QPen(color, selected ? 1.5 : 1.0));
     // Extension lines start a little off the object and run just past the dimension line.
     const double gap = 3.0 / scale_, over = 4.0 / scale_;
@@ -946,12 +1043,49 @@ void PlanView::drawDimension(QPainter& g, Vec2 a, Vec2 b, double offset, bool se
     const Vec2 tick = (dir + n).normalized() * (4.0 / scale_);
     for (Vec2 p : {da, db}) g.drawLine(toScreen(p - tick), toScreen(p + tick));
     const QPointF sa = toScreen(da), sb = toScreen(db);
+    const QRectF text = alongRect((sa + sb) / 2.0, sb - sa, 2.0);
+    if (temporary) {
+        // A backing so the number reads over room names and fills.
+        g.save();
+        g.setPen(Qt::NoPen);
+        g.setBrush(QColor(255, 255, 255, 220));
+        g.drawRoundedRect(text, 3, 3);
+        g.restore();
+    }
     drawAlong(g, (sa + sb) / 2.0, sb - sa, lengthText(distance(a, b)), 2.0);
+    return text;
 }
 
 void PlanView::drawDimensions(QPainter& g) const {
-    for (const auto& d : doc().dimensions)
-        if (d.levelId == ws_->currentLevel()) drawDimension(g, d.a, d.b, d.offset, ws_->isSelected(d.id));
+    // With something other than a dimension selected, clicking a dimension's
+    // number and typing a new one moves the selection to suit.
+    const auto& ids = ws_->selectedIds();
+    const bool movesSelection =
+        tool_ == Tool::Select && !ids.empty() &&
+        std::none_of(ids.begin(), ids.end(), [this](ObjectId id) { return doc().dimension(id) != nullptr; });
+    for (const auto& d : doc().dimensions) {
+        if (d.levelId != ws_->currentLevel()) continue;
+        const QRectF text = drawDimension(g, d.a, d.b, d.offset, ws_->isSelected(d.id));
+        if (!movesSelection || d.length() < 1e-6) continue;
+        const ObjectId dimId = d.id;
+        const std::vector<ObjectId> moving = ids;
+        addValueHit(text, d.length(), "Move to dimension", [dimId, moving](Document& doc, double v) {
+            Dimension* x = doc.dimension(dimId);
+            if (!x) return;
+            // The end nearer the selection moves; the other stays put.
+            double toA = 1e30, toB = 1e30;
+            for (ObjectId id : moving) {
+                toA = std::min(toA, distanceToObject(doc, id, x->a));
+                toB = std::min(toB, distanceToObject(doc, id, x->b));
+            }
+            const bool movesA = toA < toB;
+            const Vec2 fixed = movesA ? x->b : x->a, free = movesA ? x->a : x->b;
+            const Vec2 delta = (free - fixed).normalized() * (v - x->length());
+            // An automatic dimension stays automatic: it is redone to match.
+            (movesA ? x->a : x->b) += delta;
+            shiftObjects(doc, moving, delta);
+        });
+    }
     // Nodes of a selected dimension: squares on the points it measures, which
     // drag to other points, and a diamond on the line, which drags the string in or out.
     const Dimension* x = doc().dimension(ws_->selection());
@@ -967,6 +1101,148 @@ void PlanView::drawDimensions(QPainter& g) const {
     QPolygonF diamond;
     diamond << m + QPointF(0, -6) << m + QPointF(6, 0) << m + QPointF(0, 6) << m + QPointF(-6, 0);
     g.drawPolygon(diamond);
+}
+
+void PlanView::drawTemporaryDimensions(QPainter& g) const {
+    if (tool_ != Tool::Select || ws_->selectedIds().size() != 1) return;
+    const Document& d = doc();
+    const ObjectId sel = ws_->selection();
+    if (const Wall* w = d.wall(sel); w && w->levelId == ws_->currentLevel() && w->length() > 1.0) {
+        // To the nearest parallel wall on each side that runs alongside it.
+        const Vec2 dir = (w->b - w->a).normalized(), n = dir.perp();
+        const double len = w->length();
+        struct Near {
+            const Wall* wall = nullptr;
+            double side = 0, along = 0;
+        } nearest[2];
+        for (const auto& v : d.walls) {
+            if (v.id == w->id || v.levelId != w->levelId || v.length() < 1.0) continue;
+            if (std::abs(cross((v.b - v.a).normalized(), dir)) > 1e-3) continue;
+            const double t0 = dot(v.a - w->a, dir), t1 = dot(v.b - w->a, dir);
+            const double lo = std::max(0.0, std::min(t0, t1)), hi = std::min(len, std::max(t0, t1));
+            const double side = dot(v.a - w->a, n);
+            if (hi - lo < 1.0 || std::abs(side) < 1.0) continue;
+            Near& slot = nearest[side > 0 ? 0 : 1];
+            // Near one end of the overlap, clear of the length label in the middle.
+            if (!slot.wall || std::abs(side) < std::abs(slot.side)) slot = {&v, side, lo + std::min(36.0, (hi - lo) / 4)};
+        }
+        const Segment mine = wallMeasureLine(d, *w, d.dimensionTo);
+        for (const Near& k : nearest) {
+            if (!k.wall) continue;
+            const Segment theirs = wallMeasureLine(d, *k.wall, d.dimensionTo);
+            const Vec2 at = w->a + dir * k.along;
+            const Vec2 pa = mine.a + dir * dot(at - mine.a, dir);
+            const Vec2 pb = theirs.a + dir * dot(at - theirs.a, dir);
+            const double value = std::abs(dot(pb - pa, n));
+            if (value < 0.5) continue;
+            const QRectF text = drawDimension(g, pa, pb, 0.0, false, true);
+            // Moving away from that wall makes the number bigger.
+            const double away = k.side > 0 ? -1.0 : 1.0;
+            const ObjectId id = w->id;
+            addValueHit(text, value, "Move wall", [id, away, value](Document& doc, double v) {
+                slideWall(doc, id, away * (v - value));
+            });
+        }
+        return;
+    }
+    if (const Opening* o = d.opening(sel)) {
+        // Along its wall, from each end of the wall to the opening's center.
+        const Wall* w = d.wall(o->wallId);
+        if (!w || w->levelId != ws_->currentLevel() || w->length() < 1.0) return;
+        const Vec2 dir = (w->b - w->a).normalized();
+        const Segment m = wallMeasureLine(d, *w, d.dimensionTo);
+        const double tA = dot(m.a - w->a, dir), tB = dot(m.b - w->a, dir);
+        const Vec2 center = m.a + dir * (o->offset - tA);
+        // Inside the building, clear of the wall.
+        const double inside = dot(-wallOutside(d, *w), dir.perp()) >= 0 ? 1.0 : -1.0;
+        const double offset = inside * (w->thickness + 24.0);
+        const ObjectId id = o->id;
+        const double width = o->width, wallLength = w->length();
+        auto place = [id, width, wallLength](Document& doc, double offset) {
+            if (Opening* x = doc.opening(id)) x->offset = std::clamp(offset, width / 2, wallLength - width / 2);
+        };
+        const double fromA = o->offset - tA, toB = tB - o->offset;
+        if (fromA > 0.5) {
+            const QRectF text = drawDimension(g, m.a, center, offset, false, true);
+            addValueHit(text, fromA, "Move opening", [place, tA](Document& doc, double v) { place(doc, v + tA); });
+        }
+        if (toB > 0.5) {
+            const QRectF text = drawDimension(g, center, m.b, offset, false, true);
+            addValueHit(text, toB, "Move opening", [place, tB](Document& doc, double v) { place(doc, tB - v); });
+        }
+    }
+}
+
+void PlanView::addValueHit(QRectF rect, double value, const QString& undoText,
+                           std::function<void(Document&, double)> apply) const {
+    if (!preview_ && rect.isValid()) valueHits_.push_back({rect, value, undoText, std::move(apply)});
+}
+
+void PlanView::openValueEditor(const ValueHit& hit) {
+    editing_ = hit;
+    const QPointF c = hit.rect.center();
+    valueEdit_->setGeometry(QRect(int(c.x()) - 55, int(c.y()) - 12, 110, 24));
+    valueEdit_->setText(lengthText(hit.value));
+    valueEdit_->show();
+    valueEdit_->raise();
+    valueEdit_->setFocus();
+    valueEdit_->selectAll();
+    emit statusMessage("Type the new length and press Enter. Escape cancels.");
+}
+
+void PlanView::commitValue() {
+    if (!editing_) return;
+    const auto v = parseLength(valueEdit_->text().toStdString());
+    if (!v || *v < 0) {
+        emit statusMessage(QString("\"%1\" isn't a length. Try 12' 6\" or 150.").arg(valueEdit_->text()));
+        return;
+    }
+    const ValueHit hit = *editing_;
+    editing_.reset();
+    valueEdit_->hide();
+    setFocus();
+    if (std::abs(*v - hit.value) < 1e-6) return;
+    ws_->edit(hit.undoText, [&](Document& d) { hit.apply(d, *v); });
+}
+
+void PlanView::nudge(Vec2 delta) {
+    const auto ids = ws_->selectedIds();
+    if (ids.empty()) return;
+    ws_->edit("Nudge", [&](Document& d) { shiftObjects(d, ids, delta); });
+}
+
+void PlanView::askLengthAngle() {
+    if (!anchor_) return;
+    const Vec2 from = *anchor_;
+    const Vec2 toward = cursor_ - from;
+    QDialog dialog(this);
+    dialog.setWindowTitle(tool_ == Tool::Beam ? "Beam length and angle" : "Wall length and angle");
+    auto* form = new QFormLayout(&dialog);
+    auto* length = new QLineEdit(lengthText(std::max(toward.length(), 12.0)));
+    length->selectAll();
+    auto* angle = new QDoubleSpinBox;
+    angle->setRange(-360, 360);
+    angle->setDecimals(2);
+    angle->setSuffix(QString::fromUtf8("°"));
+    angle->setValue(toward.length() < 1e-6 ? 0.0 : std::atan2(toward.y, toward.x) * 180.0 / kPi);
+    angle->setToolTip("Counterclockwise from east: 0 runs right, 90 runs up the screen");
+    form->addRow("Length", length);
+    form->addRow("Angle", angle);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() != QDialog::Accepted) return;
+    const auto v = parseLength(length->text().toStdString());
+    if (!v || *v < 1.0) {
+        emit statusMessage(QString("\"%1\" isn't a length. Try 12' 6\" or 150.").arg(length->text()));
+        return;
+    }
+    const double rad = angle->value() * kPi / 180.0;
+    const Vec2 end = from + Vec2{std::cos(rad), std::sin(rad)} * *v;
+    toolClick(end, end);
+    cursor_ = end;
+    update();
 }
 
 void PlanView::drawTerrain(QPainter& g) const {
@@ -1054,7 +1330,7 @@ void PlanView::drawLoads(QPainter& g) const {
     g.setFont(QFont());
 }
 
-void PlanView::drawLengthLabel(QPainter& g, Vec2 a, Vec2 b) const {
+QRectF PlanView::drawLengthLabel(QPainter& g, Vec2 a, Vec2 b) const {
     const QPointF pa = toScreen(a), pb = toScreen(b);
     const QPointF mid = (pa + pb) / 2.0;
     const QString text = lengthText(distance(a, b));
@@ -1066,6 +1342,7 @@ void PlanView::drawLengthLabel(QPainter& g, Vec2 a, Vec2 b) const {
     g.setPen(QColor(20, 70, 160));
     g.drawText(box, Qt::AlignCenter, text);
     g.restore();
+    return box;
 }
 
 void PlanView::drawToolPreview(QPainter& g) const {
@@ -1413,6 +1690,20 @@ void PlanView::mousePressEvent(QMouseEvent* e) {
         return;
     }
     if (e->button() != Qt::LeftButton) return;
+    if (valueEdit_->isVisible()) {
+        valueEdit_->hide();
+        editing_.reset();
+    }
+
+    // A number that takes a typed value: a temporary dimension, the length
+    // of the selected wall, or a dimension that moves the selection.
+    if (tool_ == Tool::Select && !(e->modifiers() & Qt::ShiftModifier))
+        for (auto it = valueHits_.rbegin(); it != valueHits_.rend(); ++it)
+            if (it->rect.contains(pos)) {
+                const ValueHit hit = *it;
+                openValueEditor(hit);
+                return;
+            }
 
     // Shift starts a selection box with any tool; the box picks only what
     // the tool draws.
@@ -1606,13 +1897,16 @@ void PlanView::mouseMoveEvent(QMouseEvent* e) {
                 if ((isSel && drag_ == Drag::DimB) || (!isSel && distance(x->b, old) < 0.5)) x->b = to;
                 x->automatic = false;
             }
-        } else if (Wall* w = d.wall(sel)) {
+        } else if (const Wall* w = d.wall(sel)) {
+            // Walls joined at the ends stretch to follow, as in Chief; a
+            // joined wall moves square to itself.
             if (drag_ == Drag::Move) {
-                w->a += delta;
-                w->b += delta;
+                shiftObjects(d, {sel}, delta);
             } else {
-                (drag_ == Drag::EndA ? w->a : w->b) = snap(raw, drag_ == Drag::EndA ? w->b : w->a, e->modifiers());
+                const Vec2 to = snap(raw, drag_ == Drag::EndA ? w->b : w->a, e->modifiers());
+                setWallEnds(d, sel, drag_ == Drag::EndA ? to : w->a, drag_ == Drag::EndA ? w->b : to);
             }
+            d.refresh(); // rooms and automatic dimensions follow while dragging
         } else if (Beam* b = d.beam(sel)) {
             if (drag_ == Drag::Move) {
                 b->a += delta;
@@ -1712,6 +2006,9 @@ void PlanView::mouseReleaseEvent(QMouseEvent* e) {
 
 void PlanView::mouseDoubleClickEvent(QMouseEvent* e) {
     if (tool_ == Tool::Wall || tool_ == Tool::RoomDivider) anchor_.reset();
+    if (tool_ == Tool::Select && e->button() == Qt::LeftButton && ws_->selection() != kNoId &&
+        !pickAll(toWorld(e->position())).empty())
+        emit openObjectRequested();
     QWidget::mouseDoubleClickEvent(e);
 }
 
@@ -1821,8 +2118,30 @@ void PlanView::keyPressEvent(QKeyEvent* e) {
         }
         break;
     case Qt::Key_Tab:
-        cycleStack();
+        if (anchor_ && (tool_ == Tool::Wall || tool_ == Tool::RoomDivider || tool_ == Tool::Beam)) askLengthAngle();
+        else cycleStack();
         break;
+    case Qt::Key_Space:
+        // Spacebar returns to selecting, as in Chief.
+        if (tool_ != Tool::Select) setTool(Tool::Select);
+        break;
+    case Qt::Key_Left:
+    case Qt::Key_Right:
+    case Qt::Key_Up:
+    case Qt::Key_Down: {
+        if (anchor_ || drag_ != Drag::None || ws_->selectedIds().empty()) {
+            QWidget::keyPressEvent(e);
+            break;
+        }
+        // 1" a press, a foot with Shift.
+        const double step = e->modifiers() & Qt::ShiftModifier ? 12.0 : 1.0;
+        const Vec2 dir = e->key() == Qt::Key_Left    ? Vec2{-1, 0}
+                         : e->key() == Qt::Key_Right ? Vec2{1, 0}
+                         : e->key() == Qt::Key_Up    ? Vec2{0, 1}
+                                                     : Vec2{0, -1};
+        nudge(dir * step);
+        break;
+    }
     case Qt::Key_Delete:
     case Qt::Key_Backspace:
         deleteSelection();

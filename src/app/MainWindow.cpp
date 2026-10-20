@@ -8,6 +8,7 @@
 #include "Workspace.h"
 
 #include "oa/core/dimensions.h"
+#include "oa/core/editing.h"
 #include "oa/core/serialization.h"
 #include "oa/structural/takedown.h"
 
@@ -19,6 +20,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QStatusBar>
@@ -46,7 +48,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ws_(new Workspace
     setCentralWidget(tabs_);
 
     auto* props = new PropertiesPanel(ws_);
-    auto* propsDock = new QDockWidget("Properties", this);
+    auto* propsDock = propsDock_ = new QDockWidget("Properties", this);
     propsDock->setObjectName("properties");
     propsDock->setWidget(props);
     propsDock->setMinimumWidth(340);
@@ -60,10 +62,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ws_(new Workspace
 
     connect(props, &PropertiesPanel::sizeRequested, this, &MainWindow::openSizer);
     connect(loads, &LoadsPanel::sizeRequested, this, &MainWindow::openSizer);
+    connect(plan_, &PlanView::openObjectRequested, this, &MainWindow::openObject);
     connect(plan_, &PlanView::statusMessage, this, [this](const QString& m) { statusBar()->showMessage(m); });
 
     createActions();
     (ws_->doc().dimensionTo == DimensionTo::FramingEdge ? dimEdge_ : dimCenter_)->setChecked(true);
+    dimAuto_->setChecked(ws_->doc().autoRefreshDimensions);
     refreshLevels();
     refreshWallTypes();
     updateTitle();
@@ -73,6 +77,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ws_(new Workspace
         refreshLevels();
         refreshWallTypes();
         (ws_->doc().dimensionTo == DimensionTo::FramingEdge ? dimEdge_ : dimCenter_)->setChecked(true);
+        dimAuto_->setChecked(ws_->doc().autoRefreshDimensions);
         updateUndoActions();
     });
     connect(ws_, &Workspace::currentLevelChanged, this, &MainWindow::refreshLevels);
@@ -103,6 +108,7 @@ void MainWindow::createActions() {
     redoAction_ = edit->addAction("Redo", QKeySequence::Redo, ws_, &Workspace::redo);
     edit->addSeparator();
     edit->addAction("Delete", QKeySequence::Delete, plan_, &PlanView::deleteSelection);
+    edit->addAction("Open object", QKeySequence("Ctrl+E"), this, &MainWindow::openObject);
 
     // Tools
     QToolBar* bar = addToolBar("Tools");
@@ -169,7 +175,8 @@ void MainWindow::createActions() {
     tools->addSection("Dimensions and site");
     tools->addActions({dimension, autoDims, elevation});
     tools->addSeparator();
-    tools->addAction("Add level above", this, &MainWindow::addLevel);
+    tools->addAction("Build new floor", this, &MainWindow::buildNewFloor);
+    tools->addAction("Add empty level above", this, &MainWindow::addLevel);
 
     // The toolbar groups the tools by category, each a button with a menu.
     bar->addAction(select);
@@ -233,6 +240,15 @@ void MainWindow::createActions() {
         a->setCheckable(true);
         dimTo->addAction(a);
     }
+    dims->addSeparator();
+    dimAuto_ = dims->addAction("Update exterior dimensions automatically");
+    dimAuto_->setCheckable(true);
+    dimAuto_->setToolTip("Redo the automatic exterior dimensions after every change, like Chief's Auto Exterior Dimensions");
+    connect(dimAuto_, &QAction::triggered, this, [this](bool on) {
+        if (ws_->doc().autoRefreshDimensions == on) return;
+        ws_->edit(on ? "Update dimensions automatically" : "Stop updating dimensions",
+                  [on](Document& d) { d.autoRefreshDimensions = on; });
+    });
     QMenu* site = category("Terrain", {PlanView::Tool::Elevation});
     site->addAction(elevation);
     site->addAction("Clear the terrain", this, [this] {
@@ -481,6 +497,26 @@ void MainWindow::addLevel() {
         }
         d.levels.push_back(l);
     });
+}
+
+void MainWindow::buildNewFloor() {
+    ObjectId level = kNoId;
+    ws_->edit("Build new floor", [&](Document& d) { level = oa::buildNewFloor(d); });
+    ws_->setCurrentLevel(level);
+    if (const Level* l = ws_->doc().level(level))
+        statusBar()->showMessage(QString("%1 starts with the exterior walls of the floor below.")
+                                     .arg(QString::fromStdString(l->name)));
+}
+
+void MainWindow::openObject() {
+    if (ws_->selection() == kNoId) return;
+    propsDock_->show();
+    propsDock_->raise();
+    // The first field, ready to type in.
+    if (auto* line = propsDock_->widget()->findChild<QLineEdit*>()) {
+        line->setFocus();
+        line->selectAll();
+    }
 }
 
 void MainWindow::autoRoof() {

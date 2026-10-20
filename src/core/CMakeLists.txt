@@ -5,6 +5,7 @@ add_library(oa_core
     src/rooms.cpp
     src/terrain.cpp
     src/dimensions.cpp
+    src/editing.cpp
     src/undo.cpp
     src/serialization.cpp
 )

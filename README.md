@@ -15,6 +15,8 @@ Windows and Linux are first-class platforms. macOS is built and tested in CI on 
 - **Typed lengths**: while drawing a wall, room divider or beam, start typing a length (`12'6`, `150`, `14' 3 1/2"`) and press Enter. The new piece runs toward the cursor, snapped to 15 degrees.
 - **Door and window labels**: each opening is labeled with its size in the usual shorthand (3068 is 3'-0" by 6'-8"). Turn them off under View.
 - **Dimensions**: draw your own with the Dimension tool, or use **Dimension exterior walls** for rows of opening, corner and overall dimensions around the outside. Walls measure to the outside edge of their framing or to its center (Dimensions menu). Select a dimension to get its nodes: drag a square to move that end to another point (it snaps to framing corners, openings, posts and beam ends, and joined dimensions follow), or drag the diamond or the line to move the whole string in or out.
+- **Edit by dimension, the Chief Architect way**: select a wall and temporary dimensions (green) show the distance to the nearest parallel wall on each side; select a door or window and they show its distance to each end of its wall. Click any of those numbers, the selected wall's length, or a regular dimension, type a new value and press Enter, and the selection moves to suit. Walls joined at the ends stretch to follow when you move a wall or drag its end, a joined wall moves square to itself, and doors and windows on stretched walls keep their place. Choose which end moves when a wall's length changes in Properties. Exterior dimensions update as you edit (turn this off in the Dimensions menu).
+- **Build new floor** (Tools): fills the empty level above, or adds one, with copies of the exterior walls below.
 - **Box selection**: hold Shift and drag a box to select everything entirely inside it. With a tool picked first, only that kind is selected, so pick Windows and Shift-drag over the whole plan to select every window. Shift-click adds or removes one object. Edit what they share in Properties, drag one to move them all, or press Delete.
 - **Terrain**: place elevation points on the ground level, and contours are drawn between them at the interval you set (every fifth one heavier and labeled). The ground shows in 3D.
 - **Room floor systems**: each room can keep the level's floor framing, have its own joists (a flush shower framed deeper or dropped), or be a concrete slab (a garage or patio), with its own loads and a drop below the level's floor. Slabs show in 3D.
@@ -46,8 +48,8 @@ To build only the model and structural libraries and their tests (no Qt needed):
 
 | Key | Tool |
 | --- | --- |
-| S | Select (drag to move, drag a wall end to stretch; click again, Tab or right-click for stacked objects; Shift-drag a box to select several) |
-| W | Wall (click, click, keep clicking; type a length and press Enter; right-click or Esc to stop; Ctrl disables snapping) |
+| S or Space | Select (drag to move, drag a wall end to stretch; click again, Tab or right-click for stacked objects; Shift-drag a box to select several; arrow keys nudge 1", Shift+arrow 1'; double-click or Ctrl+E opens Properties) |
+| W | Wall (click, click, keep clicking; type a length and press Enter, or press Tab for length and angle; right-click or Esc to stop; Ctrl disables snapping) |
 | I | Interior wall |
 | D / N | Door / Window (click on a wall) |
 | B | Beam |

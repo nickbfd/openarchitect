@@ -213,18 +213,26 @@ std::vector<Dimension> exteriorDimensions(const Document& doc, ObjectId levelId)
     return out;
 }
 
-void setDimensionTo(Document& doc, DimensionTo to) {
-    doc.dimensionTo = to;
+void refreshAutomaticDimensions(Document& doc) {
     std::vector<ObjectId> levels;
     for (const auto& x : doc.dimensions)
         if (x.automatic && std::find(levels.begin(), levels.end(), x.levelId) == levels.end()) levels.push_back(x.levelId);
     for (ObjectId level : levels) {
+        std::vector<ObjectId> ids;
+        for (const auto& x : doc.dimensions)
+            if (x.automatic && x.levelId == level) ids.push_back(x.id);
         std::erase_if(doc.dimensions, [level](const Dimension& x) { return x.automatic && x.levelId == level; });
+        size_t next = 0;
         for (Dimension x : exteriorDimensions(doc, level)) {
-            x.id = doc.newId();
+            x.id = next < ids.size() ? ids[next++] : doc.newId();
             doc.dimensions.push_back(x);
         }
     }
+}
+
+void setDimensionTo(Document& doc, DimensionTo to) {
+    doc.dimensionTo = to;
+    refreshAutomaticDimensions(doc);
 }
 
 } // namespace oa
