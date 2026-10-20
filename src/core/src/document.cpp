@@ -46,6 +46,33 @@ double Document::wallHeight(const Wall& w) const {
     return l ? l->wallHeight : 97.125;
 }
 
+RoofSettings* Document::roofSettings(ObjectId id) {
+    if (Roof* r = roof(id)) return r;
+    return roofPlane(id);
+}
+
+const RoofSettings* Document::roofSettings(ObjectId id) const {
+    if (const Roof* r = roof(id)) return r;
+    return roofPlane(id);
+}
+
+ObjectId Document::levelOf(ObjectId id) const {
+    if (const Wall* w = wall(id)) return w->levelId;
+    if (const Opening* o = opening(id)) {
+        const Wall* w = wall(o->wallId);
+        return w ? w->levelId : kNoId;
+    }
+    if (const Beam* b = beam(id)) return b->levelId;
+    if (const Roof* r = roof(id)) return r->levelId;
+    if (const RoofPlane* p = roofPlane(id)) return p->levelId;
+    if (const FloorPlatform* f = findIn(platforms, id)) return f->levelId;
+    if (const Room* r = findIn(rooms, id)) return r->levelId;
+    if (level(id)) return id;
+    return kNoId;
+}
+
+bool Document::contains(ObjectId id) const { return id != kNoId && levelOf(id) != kNoId; }
+
 std::vector<const Opening*> Document::openingsIn(ObjectId wallId) const {
     std::vector<const Opening*> out;
     for (const auto& o : openings)
@@ -75,11 +102,12 @@ bool Document::remove(ObjectId id) {
         std::erase_if(rooms, onLevel);
         std::erase_if(platforms, onLevel);
         std::erase_if(roofs, onLevel);
+        std::erase_if(roofPlanes, onLevel);
         std::erase_if(beams, onLevel);
         return true;
     }
     return eraseId(openings) || eraseId(rooms) || eraseId(platforms) || eraseId(roofs) ||
-           eraseId(beams);
+           eraseId(roofPlanes) || eraseId(beams);
 }
 
 const char* toString(RoomType t) {

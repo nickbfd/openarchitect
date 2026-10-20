@@ -22,6 +22,20 @@ namespace {
 QString num(double v, int decimals = 0) { return QString::number(v, 'f', decimals); }
 QString pct(double ratio) { return QString("%1%").arg(ratio * 100.0, 0, 'f', 0); }
 
+// A cell that sorts by a number rather than by its text.
+class SortItem : public QTableWidgetItem {
+public:
+    SortItem(const QString& text, double key) : QTableWidgetItem(text) { setData(Qt::UserRole + 1, key); }
+    bool operator<(const QTableWidgetItem& other) const override {
+        const QVariant a = data(Qt::UserRole + 1), b = other.data(Qt::UserRole + 1);
+        if (a.isValid() && b.isValid()) return a.toDouble() < b.toDouble();
+        return QTableWidgetItem::operator<(other);
+    }
+};
+
+enum Column { Rank, MemberName, Material, Depth, Width, Weight, Result, Utilization, Governs, Bending, Shear,
+              LiveDefl, TotalDefl, Bearing, Studs, ColumnCount };
+
 QString casesText(const CaseLoads& c, const char* unit) {
     QStringList parts;
     for (LoadCase lc : kAllCases)
@@ -35,7 +49,7 @@ BeamSizerDialog::BeamSizerDialog(const QString& title, BeamLoads loads, DesignCr
                                  QWidget* parent)
     : QDialog(parent), loads_(std::move(loads)), criteria_(criteria), title_(title) {
     setWindowTitle(title);
-    resize(900, 640);
+    resize(1240, 680);
     auto* layout = new QVBoxLayout(this);
 
     const Reactions r = reactionsByCase(loads_);
@@ -56,7 +70,7 @@ BeamSizerDialog::BeamSizerDialog(const QString& title, BeamLoads loads, DesignCr
     loadsTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     loadsTable->verticalHeader()->hide();
     loadsTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    loadsTable->setMaximumHeight(160);
+    loadsTable->setMaximumHeight(120);
     int row = 0;
     for (const auto& l : loads_.line) {
         loadsTable->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(l.source)));
@@ -77,12 +91,38 @@ BeamSizerDialog::BeamSizerDialog(const QString& title, BeamLoads loads, DesignCr
 
     showFailing_ = new QCheckBox("Show members that fail", this);
     layout->addWidget(showFailing_);
+    auto* help = new QLabel("Rank 1 is the shallowest member that works. Click a column heading to sort by it; "
+                            "click it again to reverse. Utilization is the highest of the checks: under 100% passes.",
+                            this);
+    help->setWordWrap(true);
+    layout->addWidget(help);
 
-    results_ = new QTableWidget(0, 9, this);
-    results_->setHorizontalHeaderLabels(
-        {"Member", "Used", "Governs", "Bending", "Shear", "Live defl.", "Total defl.", "Bearing", "Studs each end"});
+    results_ = new QTableWidget(0, ColumnCount, this);
+    results_->setHorizontalHeaderLabels({"Rank", "Member", "Material", "Depth", "Width", "Weight", "Result",
+                                         "Utilization", "Governs", "Bending", "Shear", "Live defl.", "Total defl.",
+                                         "Bearing", "Studs each end"});
+    const char* tips[ColumnCount] = {
+        "Recommended order: passing members, shallowest first, then narrowest.",
+        "Catalog member and grade.",
+        "Sawn lumber, timber, glulam or LVL.",
+        "Actual depth in inches.",
+        "Actual total width of all plies in inches.",
+        "Self weight in pounds per foot.",
+        "Whether every check is under 100%.",
+        "The highest of bending, shear and deflection, as a share of what the member allows.",
+        "Which check comes closest to the limit.",
+        "Bending stress as a share of the allowable.",
+        "Shear stress as a share of the allowable.",
+        "Deflection under live, roof live or snow load.",
+        "Deflection under total load.",
+        "Bearing length each end needs.",
+        "Jack studs needed under each end for that bearing.",
+    };
+    for (int c = 0; c < ColumnCount; ++c) results_->horizontalHeaderItem(c)->setToolTip(tips[c]);
     results_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    results_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    results_->horizontalHeader()->setStretchLastSection(true);
+    results_->horizontalHeader()->setSortIndicatorShown(true);
+    results_->horizontalHeader()->setSortIndicator(Rank, Qt::AscendingOrder);
     results_->verticalHeader()->hide();
     results_->setSelectionBehavior(QAbstractItemView::SelectRows);
     results_->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -108,7 +148,10 @@ BeamSizerDialog::BeamSizerDialog(const QString& title, BeamLoads loads, DesignCr
                 [this, use] { use->setEnabled(!results_->selectedItems().isEmpty()); });
         connect(use, &QPushButton::clicked, this, [this] {
             const int r = results_->currentRow();
-            if (r >= 0 && r < static_cast<int>(shown_.size())) chosen_ = shown_[r]->member->id;
+            if (const QTableWidgetItem* item = r >= 0 ? results_->item(r, Rank) : nullptr) {
+                const int index = item->data(Qt::UserRole).toInt();
+                if (index >= 0 && index < static_cast<int>(shown_.size())) chosen_ = shown_[index]->member->id;
+            }
             accept();
         });
     }
@@ -131,26 +174,41 @@ void BeamSizerDialog::fillResults() {
     for (const auto& c : checks_)
         if (c.passes || showFailing_->isChecked()) shown_.push_back(&c);
 
+    // Sorting must be off while rows are filled, or rows move mid-fill.
+    results_->setSortingEnabled(false);
+    results_->clearContents();
     results_->setRowCount(static_cast<int>(shown_.size()));
     for (int row = 0; row < static_cast<int>(shown_.size()); ++row) {
         const MemberCheck& c = *shown_[row];
-        const QString cells[] = {
-            QString::fromStdString(c.member->name),
-            pct(c.maxRatio),
-            QString::fromStdString(c.governingCheck),
-            pct(c.bendingRatio),
-            pct(c.shearRatio),
-            QString("%1\"").arg(num(c.liveDeflection, 2)),
-            QString("%1\"").arg(num(c.totalDeflection, 2)),
-            QString("%1\"").arg(num(c.requiredBearing, 2)),
-            QString::number(c.jackStuds),
+        const Member& m = *c.member;
+        auto inches = [](double v) { return QString("%1\"").arg(num(v, 2)); };
+        SortItem* cells[ColumnCount] = {
+            new SortItem(QString::number(row + 1), row),
+            new SortItem(QString::fromStdString(m.name), m.d * 1000 + m.b), // by size when sorted
+            new SortItem(toString(m.kind), static_cast<double>(m.kind)),
+            new SortItem(inches(m.d), m.d),
+            new SortItem(inches(m.b), m.b),
+            new SortItem(QString("%1 plf").arg(num(m.selfWeightPlf(), 1)), m.selfWeightPlf()),
+            new SortItem(c.passes ? "OK" : "Fails", c.passes ? 0 : 1),
+            new SortItem(pct(c.maxRatio), c.maxRatio),
+            new SortItem(QString::fromStdString(c.governingCheck), 0),
+            new SortItem(pct(c.bendingRatio), c.bendingRatio),
+            new SortItem(pct(c.shearRatio), c.shearRatio),
+            new SortItem(inches(c.liveDeflection), c.liveDeflection),
+            new SortItem(inches(c.totalDeflection), c.totalDeflection),
+            new SortItem(inches(c.requiredBearing), c.requiredBearing),
+            new SortItem(QString::number(c.jackStuds), c.jackStuds),
         };
-        for (int col = 0; col < 9; ++col) {
-            auto* item = new QTableWidgetItem(cells[col]);
-            if (!c.passes) item->setForeground(QColor(180, 40, 40));
-            results_->setItem(row, col, item);
+        cells[Governs]->setData(Qt::UserRole + 1, QVariant()); // sort this one by text
+        cells[Rank]->setData(Qt::UserRole, row);               // index into shown_
+        for (int col = 0; col < ColumnCount; ++col) {
+            if (col != MemberName && col != Material && col != Governs)
+                cells[col]->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            if (!c.passes) cells[col]->setForeground(QColor(180, 40, 40));
+            results_->setItem(row, col, cells[col]);
         }
     }
+    results_->setSortingEnabled(true);
     if (!shown_.empty()) results_->selectRow(0);
 }
 

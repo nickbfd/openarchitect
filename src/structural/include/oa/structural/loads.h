@@ -43,6 +43,12 @@ struct Combination {
 // ASCE 7 allowable stress design combinations for gravity loads (2.4.1, 1 to 4).
 const std::vector<Combination>& asdGravityCombinations();
 
+// What a load comes from, kept as it passes down the structure so a wall on
+// the first floor can show its roof, floor and wall-weight loads apart.
+enum class LoadOrigin { Roof, Ceiling, Floor, Wall, Beam, Other };
+constexpr int kOriginCount = 6;
+const char* toString(LoadOrigin o); // "Roof", "Ceiling and attic", ...
+
 // A distributed load along a wall or beam, varying linearly from start to
 // end. Positions are inches from the member's start; intensities are plf.
 struct LineLoad {
@@ -51,6 +57,7 @@ struct LineLoad {
     CaseLoads wStart;
     CaseLoads wEnd;
     std::string source;
+    LoadOrigin origin = LoadOrigin::Other;
 
     double length() const { return end - start; }
     CaseLoads at(double s) const; // zero outside [start, end]
@@ -64,6 +71,7 @@ struct PointLoad {
     double position = 0.0;
     CaseLoads p;
     std::string source;
+    LoadOrigin origin = LoadOrigin::Beam;
 };
 
 // Peak plf per case and the largest combined plf along a set of line loads.
@@ -73,5 +81,12 @@ struct LineLoadSummary {
     std::string governingCombo;
 };
 LineLoadSummary summarize(const std::vector<LineLoad>& loads);
+
+// The summary of each origin present in `loads`, in LoadOrigin order.
+struct OriginSummary {
+    LoadOrigin origin;
+    LineLoadSummary summary;
+};
+std::vector<OriginSummary> summarizeByOrigin(const std::vector<LineLoad>& loads);
 
 } // namespace oa::structural

@@ -22,6 +22,16 @@ using namespace oa::structural;
 
 namespace {
 QString feetInches(double inches) { return QString::fromStdString(formatFeetInches(inches, 16)); }
+
+QString plf(double v) { return v > 0.5 ? QString::number(v, 'f', 0) : QString("&ndash;"); }
+
+// Plan direction a vector points, with north up the screen.
+QString compass(Vec2 v) {
+    static const char* names[] = {"east", "north-east", "north", "north-west", "west", "south-west", "south", "south-east"};
+    double deg = std::atan2(v.y, v.x) * 180.0 / kPi;
+    if (deg < 0) deg += 360.0;
+    return names[static_cast<int>(std::lround(deg / 45.0)) % 8];
+}
 } // namespace
 
 PropertiesPanel::PropertiesPanel(Workspace* ws, QWidget* parent) : QWidget(parent), ws_(ws) {
@@ -30,10 +40,12 @@ PropertiesPanel::PropertiesPanel(Workspace* ws, QWidget* parent) : QWidget(paren
     auto* scroll = new QScrollArea(this);
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     layout->addWidget(scroll);
     body_ = new QWidget;
     scroll->setWidget(body_);
     form_ = new QFormLayout(body_);
+    form_->setRowWrapPolicy(QFormLayout::WrapLongRows);
 
     connect(ws_, &Workspace::documentChanged, this, &PropertiesPanel::scheduleRebuild);
     connect(ws_, &Workspace::selectionChanged, this, &PropertiesPanel::scheduleRebuild);
@@ -65,6 +77,7 @@ void PropertiesPanel::rebuild() {
     else if (const Opening* o = d.opening(id)) showOpening(*o);
     else if (const Beam* b = d.beam(id)) showBeam(*b);
     else if (const Roof* r = d.roof(id)) showRoof(*r);
+    else if (const RoofPlane* p = d.roofPlane(id)) showRoofPlane(*p);
     else if (const FloorPlatform* f = Document::findIn(d.platforms, id)) showPlatform(*f);
     else if (const Room* rm = Document::findIn(d.rooms, id)) showRoom(*rm);
     else showPlan();
@@ -130,6 +143,8 @@ void PropertiesPanel::check(const QString& label, bool value, std::function<void
 void PropertiesPanel::choice(const QString& label, const QStringList& items, int index,
                              std::function<void(Document&, int)> set) {
     auto* combo = new QComboBox;
+    combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    combo->setMinimumContentsLength(12);
     combo->addItems(items);
     combo->setCurrentIndex(index);
     connect(combo, &QComboBox::activated, this, [this, set, label, index](int v) {
@@ -150,25 +165,54 @@ void PropertiesPanel::text(const QString& label, const QString& value,
     form_->addRow(label, edit);
 }
 
+void PropertiesPanel::note(const QString& html) {
+    auto* label = new QLabel(html);
+    label->setTextFormat(Qt::RichText);
+    label->setWordWrap(true);
+    label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    form_->addRow(label);
+}
+
 void PropertiesPanel::button(const QString& caption, std::function<void()> onClick) {
     auto* b = new QPushButton(caption);
     connect(b, &QPushButton::clicked, this, [onClick] { onClick(); });
     form_->addRow(b);
 }
 
-// Peak loads on top of a wall or beam from the current takedown.
-void PropertiesPanel::showSupportLoads(int kind, ObjectId id) {
-    const SupportLoads* s = ws_->loads().find(static_cast<SupportKind>(kind), id);
-    heading("Loads on top");
-    if (!s || (s->lineLoads.empty() && s->pointLoads.empty())) {
-        info("", "Nothing lands on it.");
-        return;
+// Loads on a wall or beam split by where they come from; for a wall, also
+// its own weight and the total it passes to what is below.
+void PropertiesPanel::showLoadBreakdown(ObjectId id) {
+    const SupportLoads* s = ws_->loads().wall(id);
+    const bool isWall = s != nullptr;
+    if (!s) s = ws_->loads().beam(id);
+    heading("Loads (peak plf)");
+    if (!s) return;
+
+    QString html = "<table cellspacing='0' cellpadding='3' width='100%'>"
+                   "<tr><th align='left'>From</th><th align='right'>D</th><th align='right'>L</th>"
+                   "<th align='right'>Lr</th><th align='right'>S</th></tr>";
+    auto row = [&html](const QString& name, const CaseLoads& c, bool bold = false) {
+        const QString b0 = bold ? "<b>" : "", b1 = bold ? "</b>" : "";
+        html += QString("<tr><td>%1%2%3</td>").arg(b0, name, b1);
+        for (LoadCase lc : kAllCases) html += QString("<td align='right'>%1%2%3</td>").arg(b0, plf(c[lc]), b1);
+        html += "</tr>";
+    };
+    for (const auto& g : summarizeByOrigin(s->lineLoads)) row(toString(g.origin), g.summary.peakPlf);
+    if (s->lineLoads.empty()) html += "<tr><td colspan='5'><i>Nothing lands on top.</i></td></tr>";
+    const auto top = s->topLoads();
+    if (!s->lineLoads.empty()) row("Total on top", top.peakPlf, true);
+    const auto bottom = s->bottomLoads();
+    if (isWall) {
+        row("This wall's weight", CaseLoads::of(s->selfWeight.wStart[LoadCase::Dead]));
+        row("Total at the bottom", bottom.peakPlf, true);
     }
-    const auto sum = s->topLoads();
-    for (LoadCase c : kAllCases)
-        if (sum.peakPlf[c] > 0.5) info(QString("%1, peak").arg(shortName(c)), QString("%1 plf").arg(sum.peakPlf[c], 0, 'f', 0));
-    if (sum.governingPlf > 0.5)
-        info("Governing", QString("%1 plf (%2)").arg(sum.governingPlf, 0, 'f', 0).arg(QString::fromStdString(sum.governingCombo)));
+    html += "</table>";
+    note(html);
+
+    if (top.governingPlf > 0.5)
+        info("Governing on top", QString("%1 plf (%2)").arg(top.governingPlf, 0, 'f', 0).arg(QString::fromStdString(top.governingCombo)));
+    if (isWall)
+        info("Governing at bottom", QString("%1 plf (%2)").arg(bottom.governingPlf, 0, 'f', 0).arg(QString::fromStdString(bottom.governingCombo)));
     for (const auto& p : s->pointLoads) {
         double total = 0.0;
         for (double v : p.p.v) total += v;
@@ -176,6 +220,12 @@ void PropertiesPanel::showSupportLoads(int kind, ObjectId id) {
                                .arg(total, 0, 'f', 0)
                                .arg(feetInches(p.position), QString::fromStdString(p.source)));
     }
+    if (const Wall* w = ws_->doc().wall(id); w && isWall)
+        note(QString("<span style='color:#666'>The wall's weight is %1 psf over its %2 height. Each row is "
+                     "a peak, and peaks can sit at different points along the wall, so rows may not add up "
+                     "exactly to the totals.</span>")
+                 .arg(w->selfWeightPsf)
+                 .arg(feetInches(ws_->doc().wallHeight(*w))));
 }
 
 // ---- Object pages ----------------------------------------------------------
@@ -214,12 +264,12 @@ void PropertiesPanel::showWall(const Wall& w) {
     length("Height (0 = level)", w.height, [id](Document& d, double v) { d.wall(id)->height = v; });
     check("Bearing", w.bearing, [id](Document& d, bool v) { d.wall(id)->bearing = v; });
     number("Self weight", w.selfWeightPsf, 0, 200, 1, " psf", [id](Document& d, double v) { d.wall(id)->selfWeightPsf = v; });
-    if (w.bearing) showSupportLoads(static_cast<int>(SupportKind::Wall), id);
+    if (w.bearing) showLoadBreakdown(id);
 }
 
 void PropertiesPanel::showOpening(const Opening& o) {
     const ObjectId id = o.id;
-    heading(o.kind == OpeningKind::Door ? "Door" : "Window");
+    heading(ws_->describe(id));
     choice("Type", {"Door", "Window"}, o.kind == OpeningKind::Door ? 0 : 1,
            [id](Document& d, int v) { d.opening(id)->kind = v == 0 ? OpeningKind::Door : OpeningKind::Window; });
     length("Width", o.width, [id](Document& d, double v) { d.opening(id)->width = v; }, 1.0);
@@ -237,7 +287,7 @@ void PropertiesPanel::showBeam(const Beam& b) {
     const Member* m = findMember(b.memberId);
     info("Member", m ? QString::fromStdString(m->name) : QString("Not sized yet"));
     button("Size beam…", [this, id] { emit sizeRequested(id); });
-    showSupportLoads(static_cast<int>(SupportKind::Beam), id);
+    showLoadBreakdown(id);
 }
 
 void PropertiesPanel::showRoof(const Roof& r) {
@@ -247,8 +297,6 @@ void PropertiesPanel::showRoof(const Roof& r) {
            [id](Document& d, int v) { d.roof(id)->style = v == 0 ? RoofStyle::Gable : RoofStyle::Hip; });
     choice("Ridge runs", {"East-west (X)", "North-south (Y)"}, r.ridgeAxis == Axis::X ? 0 : 1,
            [id](Document& d, int v) { d.roof(id)->ridgeAxis = v == 0 ? Axis::X : Axis::Y; });
-    number("Pitch", r.pitch, 0.25, 24, 2, " in 12", [id](Document& d, double v) { d.roof(id)->pitch = v; });
-    length("Overhang", r.overhang, [id](Document& d, double v) { d.roof(id)->overhang = v; });
     length("Width", r.footprint.width(), [id](Document& d, double v) {
         Roof* x = d.roof(id);
         x->footprint.max.x = x->footprint.min.x + v;
@@ -257,17 +305,69 @@ void PropertiesPanel::showRoof(const Roof& r) {
         Roof* x = d.roof(id);
         x->footprint.max.y = x->footprint.min.y + v;
     }, 12.0);
-    number("Dead load", r.deadPsf, 0, 100, 1, " psf", [id](Document& d, double v) { d.roof(id)->deadPsf = v; });
-    check("Structural ridge beam", r.structuralRidge, [id](Document& d, bool v) { d.roof(id)->structuralRidge = v; });
-    check("Ceiling joists", r.hasCeiling, [id](Document& d, bool v) { d.roof(id)->hasCeiling = v; });
-    if (r.hasCeiling) {
-        number("Ceiling dead load", r.ceilingDeadPsf, 0, 50, 1, " psf", [id](Document& d, double v) { d.roof(id)->ceilingDeadPsf = v; });
-        choice("Attic", {"No storage (10 psf)", "Limited storage (20 psf)"}, r.atticLivePsf > 15 ? 1 : 0,
-               [id](Document& d, int v) { d.roof(id)->atticLivePsf = v == 0 ? 10.0 : 20.0; });
+    if (r.framing == RoofFraming::Rafters && r.style == RoofStyle::Gable) {
+        check("Structural ridge beam", r.structuralRidge, [id](Document& d, bool v) { d.roof(id)->structuralRidge = v; });
+        if (r.hasRidgeBeam()) button("Size ridge beam…", [this, id] { emit sizeRequested(id); });
     }
-    info("Snow on roof", QString("%1 psf").arg(roofSnowPsf(ws_->doc().site, r.slopeRadians()), 0, 'f', 1));
-    if (r.structuralRidge && r.style == RoofStyle::Gable)
-        button("Size ridge beam…", [this, id] { emit sizeRequested(id); });
+    showRoofSettings(id, r);
+}
+
+void PropertiesPanel::showRoofPlane(const RoofPlane& p) {
+    const ObjectId id = p.id;
+    heading(QString("Roof plane %1").arg(id));
+    info("Slopes down toward", "the " + compass(p.upslope() * -1.0));
+    info("Eave length", feetInches(p.eaveLength()));
+    length("Run (eave to high side)", p.run, [id](Document& d, double v) { d.roofPlane(id)->run = v; }, 12.0);
+    button("Flip the slope", [this, id] {
+        apply("Flip roof plane", [id](Document& d) {
+            RoofPlane* x = d.roofPlane(id);
+            const Segment high = x->highLine();
+            x->a = high.b;
+            x->b = high.a;
+        });
+    });
+    showRoofSettings(id, p);
+    note("<span style='color:#666'>The eave side and the high side each need a bearing wall or beam "
+         "beneath them on this level.</span>");
+}
+
+// Framing, slope and loads shared by roofs and roof planes.
+void PropertiesPanel::showRoofSettings(ObjectId id, const RoofSettings& r) {
+    const Site& site = ws_->doc().site;
+    const bool trusses = r.framing == RoofFraming::Trusses;
+    choice("Structure", {"Rafters (stick framed)", "Manufactured trusses"}, trusses ? 1 : 0,
+           [id](Document& d, int v) { d.roofSettings(id)->framing = v == 0 ? RoofFraming::Rafters : RoofFraming::Trusses; });
+    number("Pitch", r.pitch, 0.25, 24, 2, " in 12", [id](Document& d, double v) { d.roofSettings(id)->pitch = v; });
+    length("Overhang", r.overhang, [id](Document& d, double v) { d.roofSettings(id)->overhang = v; });
+
+    heading("Roof loads");
+    number("Dead load", r.deadPsf, 0, 100, 1, " psf", [id](Document& d, double v) { d.roofSettings(id)->deadPsf = v; });
+    info("Roof live load", "20 psf (IRC R301.6)");
+    number("Ground snow pg (whole site)", site.groundSnowPsf, 0, 400, 1, " psf",
+           [](Document& d, double v) { d.site.groundSnowPsf = v; });
+    const double calculated = roofSnowPsf(site, r.slopeRadians());
+    choice("Snow load", {QString("Calculated, %1 psf").arg(calculated, 0, 'f', 1), "Custom"}, r.customSnow ? 1 : 0,
+           [id, calculated](Document& d, int v) {
+               RoofSettings* x = d.roofSettings(id);
+               x->customSnow = v == 1;
+               if (x->customSnow && x->snowPsf <= 0.0) x->snowPsf = std::round(calculated);
+           });
+    if (r.customSnow)
+        number("Roof snow load", r.snowPsf, 0, 400, 1, " psf", [id](Document& d, double v) { d.roofSettings(id)->snowPsf = v; });
+
+    heading("Ceiling");
+    check(trusses ? "Ceiling on bottom chords" : "Ceiling joists", r.hasCeiling,
+          [id](Document& d, bool v) { d.roofSettings(id)->hasCeiling = v; });
+    if (r.hasCeiling) {
+        number("Ceiling dead load", r.ceilingDeadPsf, 0, 50, 1, " psf",
+               [id](Document& d, double v) { d.roofSettings(id)->ceilingDeadPsf = v; });
+        choice("Attic", {"No storage (10 psf)", "Limited storage (20 psf)"}, r.atticLivePsf > 15 ? 1 : 0,
+               [id](Document& d, int v) { d.roofSettings(id)->atticLivePsf = v == 0 ? 10.0 : 20.0; });
+    }
+    note(trusses ? "<span style='color:#666'>Trusses span from eave to eave, so interior walls carry no roof "
+                   "or ceiling load. The truss maker designs the trusses themselves.</span>"
+                 : "<span style='color:#666'>Rafters bear on the eave walls; ceiling joists also bear on "
+                   "interior bearing walls they cross.</span>");
 }
 
 void PropertiesPanel::showPlatform(const FloorPlatform& f) {

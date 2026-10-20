@@ -7,6 +7,7 @@
 
 #include <QKeyEvent>
 #include <QLineF>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -55,9 +56,17 @@ PlanView::PlanView(Workspace* ws, QWidget* parent) : QWidget(parent), ws_(ws) {
     setFocusPolicy(Qt::StrongFocus);
     setAutoFillBackground(false);
     connect(ws_, &Workspace::documentChanged, this, qOverload<>(&QWidget::update));
-    connect(ws_, &Workspace::selectionChanged, this, qOverload<>(&QWidget::update));
+    connect(ws_, &Workspace::selectionChanged, this, [this] {
+        // A selection made elsewhere (the 3D view, the loads table) ends the stack.
+        if (std::find(stack_.begin(), stack_.end(), ws_->selection()) == stack_.end()) {
+            stack_.clear();
+            stackHint_.clear();
+        }
+        update();
+    });
     connect(ws_, &Workspace::currentLevelChanged, this, [this] {
         anchor_.reset();
+        anchor2_.reset();
         update();
     });
 }
@@ -67,12 +76,14 @@ const Document& PlanView::doc() const { return preview_ ? *preview_ : ws_->doc()
 void PlanView::setTool(Tool tool) {
     tool_ = tool;
     anchor_.reset();
+    anchor2_.reset();
     drag_ = Drag::None;
     preview_.reset();
     setCursor(tool == Tool::Select ? Qt::ArrowCursor : Qt::CrossCursor);
     emit toolChanged(tool);
     static const char* hints[] = {
-        "Click to select; drag to move; drag a wall end to stretch it.",
+        "Click to select; click the same spot again, press Tab or right-click to pick an object underneath. "
+        "Drag to move; drag a wall end to stretch it.",
         "Click to start a wall, click again to end it. Keep clicking to chain walls; right-click or Esc to stop. Ctrl turns off snapping.",
         "Click on a wall to place a door.",
         "Click on a wall to place a window.",
@@ -80,6 +91,7 @@ void PlanView::setTool(Tool tool) {
         "Drag a rectangle for the floor framing of this level. Joists run the short way.",
         "Drag a rectangle over the bearing walls for a roof. The ridge runs the long way.",
         "Drag a rectangle for a room.",
+        "Click the two ends of the eave (the low edge), then click on the high side to set how far the plane runs uphill.",
     };
     emit statusMessage(hints[static_cast<int>(tool)]);
     update();
@@ -108,6 +120,8 @@ void PlanView::zoomToFit() {
         grow(r.footprint.min - Vec2{r.overhang, r.overhang});
         grow(r.footprint.max + Vec2{r.overhang, r.overhang});
     }
+    for (const auto& r : doc().roofPlanes)
+        for (Vec2 c : r.outline(true)) grow(c);
     if (box.min.x > box.max.x) box = {{0, 0}, {feet(40), feet(30)}};
     const double margin = 48.0;
     const double sx = width() / (box.width() + 2 * margin);
@@ -170,39 +184,89 @@ const Wall* PlanView::wallNear(Vec2 p, double pixelTolerance) const {
     return best;
 }
 
-ObjectId PlanView::pick(Vec2 p) const {
+std::vector<ObjectId> PlanView::pickAll(Vec2 p) const {
     const ObjectId level = ws_->currentLevel();
     const double tol = kPickPixels / scale_;
+    std::vector<ObjectId> hits;
 
+    for (const auto& b : doc().beams)
+        if (b.levelId == level && b.centerline().distanceTo(p) <= 3.0 + tol) hits.push_back(b.id);
     for (const auto& o : doc().openings) {
         const Wall* w = doc().wall(o.wallId);
         if (!w || w->levelId != level) continue;
         const Segment line = w->centerline();
         const double along = line.project(p) * w->length();
         if (line.distanceTo(p) <= w->thickness / 2.0 + tol && std::abs(along - o.offset) <= o.width / 2.0)
-            return o.id;
+            hits.push_back(o.id);
     }
-    if (const Wall* w = wallNear(p, kPickPixels)) return w->id;
-    for (const auto& b : doc().beams)
-        if (b.levelId == level && b.centerline().distanceTo(p) <= 3.0 + tol) return b.id;
+    for (const auto& w : doc().walls)
+        if (w.levelId == level && w.centerline().distanceTo(p) <= w.thickness / 2.0 + tol) hits.push_back(w.id);
+    // Roofs are picked near their edges so the rooms under them stay easy to click.
+    auto nearEdges = [&](const Polygon& c, double band) {
+        for (size_t i = 0; i < c.size(); ++i)
+            if (Segment{c[i], c[(i + 1) % c.size()]}.distanceTo(p) <= band) return true;
+        return false;
+    };
+    for (const auto& r : doc().roofPlanes) {
+        if (r.levelId != level) continue;
+        const Polygon outline = r.outline(true);
+        if (nearEdges(outline, tol) || (contains(outline, p) && nearEdges(outline, std::max(r.overhang, 12.0) + tol)))
+            hits.push_back(r.id);
+    }
     for (const auto& r : doc().roofs) {
         if (r.levelId != level) continue;
         const Polygon c = r.footprint.corners();
         for (size_t i = 0; i < 4; ++i)
             if (Segment{c[i], c[(i + 1) % 4]}.distanceTo(p) <= r.overhang + tol &&
                 !Rect{r.footprint.min + Vec2{r.overhang, r.overhang}, r.footprint.max - Vec2{r.overhang, r.overhang}}
-                     .contains(p))
-                return r.id;
+                     .contains(p)) {
+                hits.push_back(r.id);
+                break;
+            }
     }
-    for (const auto& f : doc().platforms) {
-        if (f.levelId != level) continue;
-        const Polygon c = f.area.corners();
-        for (size_t i = 0; i < 4; ++i)
-            if (Segment{c[i], c[(i + 1) % 4]}.distanceTo(p) <= tol * 1.5) return f.id;
-    }
+    for (const auto& f : doc().platforms)
+        if (f.levelId == level && nearEdges(f.area.corners(), tol * 1.5)) hits.push_back(f.id);
     for (const auto& r : doc().rooms)
-        if (r.levelId == level && contains(r.outline, p)) return r.id;
-    return kNoId;
+        if (r.levelId == level && contains(r.outline, p)) hits.push_back(r.id);
+    return hits;
+}
+
+ObjectId PlanView::pick(Vec2 p) const {
+    const auto hits = pickAll(p);
+    return hits.empty() ? kNoId : hits.front();
+}
+
+void PlanView::selectFromStack(const std::vector<ObjectId>& hits, ObjectId id) {
+    stack_ = hits;
+    stackHint_.clear();
+    if (hits.size() > 1) {
+        const auto it = std::find(hits.begin(), hits.end(), id);
+        stackHint_ = QString("%1 (%2 of %3 here). Click again or press Tab for the next one, or right-click for a list.")
+                         .arg(ws_->describe(id))
+                         .arg(it - hits.begin() + 1)
+                         .arg(hits.size());
+    }
+    ws_->select(id);
+    update();
+}
+
+void PlanView::cycleStack() {
+    if (stack_.size() < 2) return;
+    auto it = std::find(stack_.begin(), stack_.end(), ws_->selection());
+    const size_t next = it == stack_.end() ? 0 : (static_cast<size_t>(it - stack_.begin()) + 1) % stack_.size();
+    selectFromStack(stack_, stack_[next]);
+}
+
+void PlanView::showStackMenu(QPointF screenPos, const std::vector<ObjectId>& hits) {
+    QMenu menu(this);
+    menu.addSection("Select");
+    for (ObjectId id : hits) {
+        QAction* a = menu.addAction(ws_->describe(id));
+        a->setCheckable(true);
+        a->setChecked(id == ws_->selection());
+        connect(a, &QAction::triggered, this, [this, hits, id] { selectFromStack(hits, id); });
+    }
+    menu.exec(mapToGlobal(screenPos.toPoint()));
 }
 
 // ---- Painting --------------------------------------------------------------
@@ -224,6 +288,7 @@ void PlanView::paintEvent(QPaintEvent*) {
     drawOpenings(g);
     drawBeams(g);
     drawRoofs(g);
+    drawRoofPlanes(g);
     if (showLoads_) drawLoads(g);
     drawToolPreview(g);
 
@@ -231,6 +296,14 @@ void PlanView::paintEvent(QPaintEvent*) {
     g.setPen(QColor(90, 90, 90));
     g.drawText(QRectF(10, 6, width() - 20, 20), Qt::AlignLeft,
                level ? QString::fromStdString(level->name) : QString());
+    if (!stackHint_.isEmpty()) {
+        const QRectF box(10, 28, std::min(width() - 20.0, 640.0), 22);
+        g.setPen(Qt::NoPen);
+        g.setBrush(QColor(30, 110, 220, 230));
+        g.drawRoundedRect(box, 4, 4);
+        g.setPen(Qt::white);
+        g.drawText(box.adjusted(8, 0, -8, 0), Qt::AlignVCenter | Qt::AlignLeft, stackHint_);
+    }
 }
 
 void PlanView::drawGrid(QPainter& g) const {
@@ -433,6 +506,42 @@ void PlanView::drawRoofs(QPainter& g) const {
     }
 }
 
+void PlanView::drawRoofPlanes(QPainter& g) const {
+    for (const auto& r : doc().roofPlanes) {
+        if (r.levelId != ws_->currentLevel() || r.eaveLength() < 1e-6) continue;
+        const bool selected = r.id == ws_->selection();
+        const QColor color = selected ? QColor(30, 110, 220) : QColor(150, 60, 60);
+        auto poly = [this](const Polygon& c) {
+            QPolygonF out;
+            for (Vec2 p : c) out << toScreen(p);
+            return out;
+        };
+        g.setPen(QPen(color, selected ? 2 : 1, Qt::DashLine));
+        g.setBrush(selected ? QColor(30, 110, 220, 30) : QColor(150, 60, 60, 18));
+        g.drawPolygon(poly(r.outline(true)));
+        // Bearing lines: the eave and the high side.
+        g.setPen(QPen(color, selected ? 2 : 1));
+        const Segment high = r.highLine();
+        g.drawLine(toScreen(r.a), toScreen(r.b));
+        g.drawLine(toScreen(high.a), toScreen(high.b));
+
+        // Arrow pointing downhill from the middle of the plane.
+        const Vec2 up = r.upslope();
+        const Vec2 mid = (r.a + r.b) * 0.5 + up * (r.run * 0.5);
+        const double arrow = std::min(r.run * 0.35, 48.0);
+        const Vec2 tip = mid - up * arrow;
+        g.drawLine(toScreen(mid + up * arrow), toScreen(tip));
+        const Vec2 along = (r.b - r.a).normalized();
+        const double head = std::min(arrow * 0.4, 10.0 / scale_ * 1.5);
+        QPolygonF arrowHead;
+        arrowHead << toScreen(tip) << toScreen(tip + up * head + along * head * 0.6) << toScreen(tip + up * head - along * head * 0.6);
+        g.setBrush(color);
+        g.drawPolygon(arrowHead);
+        const QPointF labelAt = toScreen(r.a - up * r.overhang) + QPointF(-up.x * 14 + 2, up.y * 14 + 4);
+        g.drawText(labelAt, QString("Roof plane, %1/12").arg(r.pitch));
+    }
+}
+
 void PlanView::drawLoads(QPainter& g) const {
     const auto& result = ws_->loads();
     double maxPlf = 1.0;
@@ -526,6 +635,28 @@ void PlanView::drawToolPreview(QPainter& g) const {
             g.drawPolygon(poly);
         }
         break;
+    case Tool::RoofPlane:
+        if (anchor_ && !anchor2_) {
+            g.setPen(QPen(QColor(150, 60, 60, 200), 2));
+            g.drawLine(toScreen(*anchor_), toScreen(cursor_));
+            drawLengthLabel(g, *anchor_, cursor_);
+        } else if (anchor_ && anchor2_) {
+            RoofPlane r;
+            r.a = *anchor_;
+            r.b = *anchor2_;
+            const double run = cross((r.b - r.a).normalized(), cursor_ - r.a);
+            if (run < 0) std::swap(r.a, r.b);
+            r.run = std::abs(run);
+            QPolygonF poly;
+            for (Vec2 p : r.outline()) poly << toScreen(p);
+            g.setBrush(QColor(150, 60, 60, 40));
+            g.drawPolygon(poly);
+            g.setPen(QPen(QColor(150, 60, 60), 2));
+            g.drawLine(toScreen(r.a), toScreen(r.b));
+            const Segment high = r.highLine();
+            drawLengthLabel(g, (r.a + r.b) * 0.5, (high.a + high.b) * 0.5);
+        }
+        break;
     case Tool::Select:
         break;
     }
@@ -609,6 +740,28 @@ void PlanView::finishRect(Vec2 a, Vec2 b) {
     ws_->select(created);
 }
 
+void PlanView::finishRoofPlane(Vec2 a, Vec2 b, Vec2 high) {
+    const double run = cross((b - a).normalized(), high - a);
+    if (std::abs(run) < 12.0) {
+        emit statusMessage("Click farther from the eave to give the roof plane some run.");
+        return;
+    }
+    if (run < 0) std::swap(a, b); // the plane always rises to the left of a to b
+    const ObjectId level = ws_->currentLevel();
+    ObjectId created = kNoId;
+    ws_->edit("Add roof plane", [&](Document& d) {
+        RoofPlane r;
+        r.id = d.newId();
+        r.levelId = level;
+        r.a = a;
+        r.b = b;
+        r.run = std::round(std::abs(run));
+        d.roofPlanes.push_back(r);
+        created = r.id;
+    });
+    ws_->select(created);
+}
+
 void PlanView::deleteSelection() {
     const ObjectId id = ws_->selection();
     if (id == kNoId) return;
@@ -624,7 +777,13 @@ void PlanView::mousePressEvent(QMouseEvent* e) {
         return;
     }
     if (e->button() == Qt::RightButton) {
+        if (tool_ == Tool::Select) {
+            const auto hits = pickAll(toWorld(pos));
+            if (!hits.empty()) showStackMenu(pos, hits);
+            return;
+        }
         anchor_.reset();
+        anchor2_.reset();
         update();
         return;
     }
@@ -645,10 +804,18 @@ void PlanView::mousePressEvent(QMouseEvent* e) {
             if (QLineF(toScreen(a), pos).length() < kPickPixels) drag_ = Drag::EndA;
             else if (QLineF(toScreen(b), pos).length() < kPickPixels) drag_ = Drag::EndB;
         }
+        cycleOnRelease_ = false;
         if (drag_ == Drag::None) {
-            const ObjectId hit = pick(raw);
-            ws_->select(hit);
-            if (doc().wall(hit) || doc().beam(hit) || doc().opening(hit)) drag_ = Drag::Move;
+            const auto hits = pickAll(raw);
+            ObjectId hit = hits.empty() ? kNoId : hits.front();
+            if (std::find(hits.begin(), hits.end(), sel) != hits.end() && sel != kNoId) {
+                // Clicking what is already selected keeps it, so it can be dragged;
+                // a click without a drag then moves on to the next object below.
+                hit = sel;
+                cycleOnRelease_ = hits.size() > 1 && hits == stack_;
+            }
+            selectFromStack(hits, hit);
+            if (doc().wall(hit) || doc().beam(hit) || doc().opening(hit) || doc().roofPlane(hit)) drag_ = Drag::Move;
         }
         if (drag_ != Drag::None) {
             dragStart_ = raw;
@@ -700,6 +867,18 @@ void PlanView::mousePressEvent(QMouseEvent* e) {
     case Tool::Room:
         anchor_ = p;
         break;
+    case Tool::RoofPlane:
+        if (!anchor_) {
+            anchor_ = p;
+        } else if (!anchor2_) {
+            if (distance(*anchor_, p) >= 12.0) anchor2_ = p;
+        } else {
+            const Vec2 a = *anchor_, b = *anchor2_;
+            anchor_.reset();
+            anchor2_.reset();
+            finishRoofPlane(a, b, p);
+        }
+        break;
     }
     update();
 }
@@ -713,7 +892,7 @@ void PlanView::mouseMoveEvent(QMouseEvent* e) {
         return;
     }
     const Vec2 raw = toWorld(pos);
-    const bool twoPoint = tool_ == Tool::Wall || tool_ == Tool::Beam;
+    const bool twoPoint = tool_ == Tool::Wall || tool_ == Tool::Beam || (tool_ == Tool::RoofPlane && !anchor2_);
     cursor_ = snap(raw, twoPoint ? anchor_ : std::nullopt, e->modifiers());
 
     if (drag_ != Drag::None && preview_) {
@@ -734,6 +913,9 @@ void PlanView::mouseMoveEvent(QMouseEvent* e) {
             } else {
                 (drag_ == Drag::EndA ? b->a : b->b) = snap(raw, drag_ == Drag::EndA ? b->b : b->a, e->modifiers());
             }
+        } else if (RoofPlane* r = d.roofPlane(sel)) {
+            r->a += delta;
+            r->b += delta;
         } else if (Opening* o = d.opening(sel)) {
             if (const Wall* w = d.wall(o->wallId))
                 o->offset = std::round(std::clamp(w->centerline().project(raw) * w->length(), o->width / 2,
@@ -754,6 +936,11 @@ void PlanView::mouseReleaseEvent(QMouseEvent* e) {
     }
     if (e->button() != Qt::LeftButton) return;
 
+    if (drag_ == Drag::None && cycleOnRelease_) {
+        cycleOnRelease_ = false;
+        cycleStack();
+        return;
+    }
     if (drag_ != Drag::None) {
         const Drag kind = drag_;
         drag_ = Drag::None;
@@ -763,7 +950,9 @@ void PlanView::mouseReleaseEvent(QMouseEvent* e) {
             ws_->edit(kind == Drag::Move ? "Move" : "Stretch", [&](Document& d) { d = std::move(result); });
         } else {
             preview_.reset();
+            if (cycleOnRelease_) cycleStack();
         }
+        cycleOnRelease_ = false;
         update();
         return;
     }
@@ -794,6 +983,7 @@ void PlanView::keyPressEvent(QKeyEvent* e) {
     case Qt::Key_Escape:
         if (anchor_ || drag_ != Drag::None) {
             anchor_.reset();
+            anchor2_.reset();
             drag_ = Drag::None;
             preview_.reset();
             update();
@@ -802,6 +992,9 @@ void PlanView::keyPressEvent(QKeyEvent* e) {
         } else {
             ws_->select(kNoId);
         }
+        break;
+    case Qt::Key_Tab:
+        cycleStack();
         break;
     case Qt::Key_Delete:
     case Qt::Key_Backspace:

@@ -45,7 +45,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ws_(new Workspace
     auto* propsDock = new QDockWidget("Properties", this);
     propsDock->setObjectName("properties");
     propsDock->setWidget(props);
-    propsDock->setMinimumWidth(300);
+    propsDock->setMinimumWidth(340);
     addDockWidget(Qt::RightDockWidgetArea, propsDock);
 
     auto* loads = new LoadsPanel(ws_);
@@ -119,7 +119,8 @@ void MainWindow::createActions() {
         {PlanView::Tool::Select, "Select", "S"}, {PlanView::Tool::Wall, "Wall", "W"},
         {PlanView::Tool::Door, "Door", "D"},     {PlanView::Tool::Window, "Window", "N"},
         {PlanView::Tool::Beam, "Beam", "B"},     {PlanView::Tool::Floor, "Floor framing", "J"},
-        {PlanView::Tool::Roof, "Roof", "R"},     {PlanView::Tool::Room, "Room", "M"},
+        {PlanView::Tool::Roof, "Roof", "R"},     {PlanView::Tool::RoofPlane, "Roof plane", "P"},
+        {PlanView::Tool::Room, "Room", "M"},
     };
     for (const auto& def : defs) {
         QAction* a = tools->addAction(def.name);

@@ -51,6 +51,7 @@ public:
     TakedownResult run() {
         createSupports();
         for (const auto& roof : doc_.roofs) applyRoof(roof);
+        for (const auto& plane : doc_.roofPlanes) applyRoofPlane(plane);
         for (const auto& p : doc_.platforms) applyPlatform(p);
 
         auto levels = doc_.levelsByElevation();
@@ -185,7 +186,7 @@ private:
 
         const double theta = roof.slopeRadians();
         const CaseLoads psf = CaseLoads::of(roof.deadPsf / std::cos(theta), 0.0, kRoofLivePsf,
-                                            roofSnowPsf(doc_.site, theta));
+                                            designSnowPsf(doc_.site, roof));
         const std::string name = "Roof " + std::to_string(roof.id);
         const auto targets = supportsOn(roof.levelId);
 
@@ -203,7 +204,7 @@ private:
 
         if (roof.style == RoofStyle::Gable) {
             double eaveDepth = run + o;
-            if (roof.structuralRidge) {
+            if (roof.hasRidgeBeam()) {
                 // Rafters span from the wall to the ridge beam with an overhang.
                 eaveDepth = (run + o) * (run + o) / (2.0 * run);
                 applyRidgeBeam(roof, psf, (run * run - o * o) / run);
@@ -212,10 +213,10 @@ private:
                 if (!isEave(i)) continue;
                 const double len = edges[i].length();
                 const CaseLoads w = psf * (eaveDepth / 12.0);
-                applyEdge(edges[i], {{0.0, len, w, w, name}}, targets, name);
+                applyEdge(edges[i], {{0.0, len, w, w, name, LoadOrigin::Roof}}, targets, name, "eave");
             }
         } else {
-            if (roof.structuralRidge)
+            if (roof.structuralRidge && roof.framing == RoofFraming::Rafters)
                 warn(name + ": a structural ridge on a hip roof is not modeled yet; loads go to the walls.");
             for (int i = 0; i < 4; ++i) {
                 const double len = edges[i].length();
@@ -223,7 +224,8 @@ private:
                 const double half = across / 2.0;
                 std::vector<LineLoad> profile;
                 auto add = [&](double s0, double d0, double s1, double d1) {
-                    if (s1 - s0 > 1e-6) profile.push_back({s0, s1, psf * (d0 / 12.0), psf * (d1 / 12.0), name});
+                    if (s1 - s0 > 1e-6)
+                        profile.push_back({s0, s1, psf * (d0 / 12.0), psf * (d1 / 12.0), name, LoadOrigin::Roof});
                 };
                 // Straight skeleton of a rectangle: depth = min(s, len - s, across / 2).
                 if (len / 2.0 <= half) {
@@ -235,24 +237,58 @@ private:
                     add(len - half, half, len, 0.0);
                 }
                 add(0.0, o, len, o); // overhang strip
-                applyEdge(edges[i], profile, targets, name);
+                applyEdge(edges[i], profile, targets, name, "eave");
             }
         }
 
         if (roof.hasCeiling) {
             const Axis joists = otherAxis(roof.ridgeAxis);
             applyAreaLoad(fp, joists, CaseLoads::of(roof.ceilingDeadPsf, roof.atticLivePsf), roof.levelId,
-                          name + " ceiling");
+                          name + " ceiling", LoadOrigin::Ceiling, roof.framing == RoofFraming::Trusses);
         }
     }
 
+    // A single plane: rafters or mono trusses span from the eave bearing line
+    // up to the high bearing line, with the overhang cantilevered past the eave.
+    void applyRoofPlane(const RoofPlane& plane) {
+        const double run = plane.run;
+        if (run < 1.0 || plane.eaveLength() < 1.0) return;
+        const double theta = plane.slopeRadians();
+        const CaseLoads psf = CaseLoads::of(plane.deadPsf / std::cos(theta), 0.0, kRoofLivePsf,
+                                            designSnowPsf(doc_.site, plane));
+        const std::string name = "Roof plane " + std::to_string(plane.id);
+        const auto targets = supportsOn(plane.levelId);
+        const double o = plane.overhang;
+        const double len = plane.eaveLength();
+
+        const double eaveDepth = (run + o) * (run + o) / (2.0 * run);
+        double highDepth = (run * run - o * o) / (2.0 * run);
+        if (highDepth < 0.0) {
+            warn(name + ": the overhang is longer than the run, so the high side would lift up. "
+                        "Uplift is not modeled; the high side gets no load.");
+            highDepth = 0.0;
+        }
+        const CaseLoads eave = psf * (eaveDepth / 12.0);
+        const CaseLoads high = psf * (highDepth / 12.0);
+        std::vector<LineLoad> eaveLoads = {{0.0, len, eave, eave, name, LoadOrigin::Roof}};
+        std::vector<LineLoad> highLoads;
+        if (highDepth > 0.0) highLoads.push_back({0.0, len, high, high, name, LoadOrigin::Roof});
+        if (plane.hasCeiling) {
+            const CaseLoads c = CaseLoads::of(plane.ceilingDeadPsf, plane.atticLivePsf) * (run / 2.0 / 12.0);
+            eaveLoads.push_back({0.0, len, c, c, name + " ceiling", LoadOrigin::Ceiling});
+            highLoads.push_back({0.0, len, c, c, name + " ceiling", LoadOrigin::Ceiling});
+        }
+        applyEdge(plane.eaveLine(), eaveLoads, targets, name, "eave");
+        if (!highLoads.empty()) applyEdge(plane.highLine(), highLoads, targets, name, "high side");
+    }
+
     void applyEdge(const Segment& edge, const std::vector<LineLoad>& profile, const std::vector<size_t>& targets,
-                   const std::string& name) {
+                   const std::string& name, const std::string& what) {
         std::vector<size_t> walls;
         for (size_t i : targets)
             if (supports()[i].kind != SupportKind::RidgeBeam) walls.push_back(i);
         for (const auto& gap : transfer(edge, profile, {}, walls, kRoofEdgeTolerance, name))
-            warn(name + ": " + feetText(gap.hi - gap.lo) + " of eave has no bearing wall or beam beneath it.");
+            warn(name + ": " + feetText(gap.hi - gap.lo) + " of " + what + " has no bearing wall or beam beneath it.");
     }
 
     void applyRidgeBeam(const Roof& roof, const CaseLoads& psf, double tributary) {
@@ -266,7 +302,7 @@ private:
         s.line = roof.ridgeAxis == Axis::X ? Segment{{fp.min.x, c.y}, {fp.max.x, c.y}}
                                            : Segment{{c.x, fp.min.y}, {c.x, fp.max.y}};
         const CaseLoads w = psf * (tributary / 12.0);
-        s.lineLoads.push_back({0.0, s.length(), w, w, "Roof " + std::to_string(roof.id)});
+        s.lineLoads.push_back({0.0, s.length(), w, w, "Roof " + std::to_string(roof.id), LoadOrigin::Roof});
         supports().push_back(std::move(s));
     }
 
@@ -276,13 +312,14 @@ private:
         const Level* below = doc_.levelBelow(p.levelId);
         if (!below) return; // the lowest floor bears on the foundation or slab
         applyAreaLoad(p.area, p.joistAxis, CaseLoads::of(p.deadPsf, p.livePsf), below->id,
-                      "Floor " + std::to_string(p.id) + " (" + levelName(p.levelId) + ")");
+                      "Floor " + std::to_string(p.id) + " (" + levelName(p.levelId) + ")", LoadOrigin::Floor);
     }
 
     // One-way framing over a rectangle. Joists run along `joistAxis`; the
-    // supports are walls and beams on `supportLevel` running across them.
+    // supports are walls and beams on `supportLevel` running across them,
+    // or only those at the two ends of the span when `endsOnly` (trusses).
     void applyAreaLoad(const Rect& area, Axis joistAxis, const CaseLoads& psf, ObjectId supportLevel,
-                       const std::string& name) {
+                       const std::string& name, LoadOrigin origin, bool endsOnly = false) {
         const bool joistsAlongY = joistAxis == Axis::Y;
         auto spanCoord = [&](Vec2 p) { return joistsAlongY ? p.y : p.x; };
         auto crossCoord = [&](Vec2 p) { return joistsAlongY ? p.x : p.y; };
@@ -305,6 +342,8 @@ private:
             if (alongCross < 0.9999) continue; // not perpendicular to the joists
             const double at = spanCoord((s.line.a + s.line.b) * 0.5);
             if (at < spanMin - kAreaEdgeTolerance || at > spanMax + kAreaEdgeTolerance) continue;
+            if (endsOnly && std::abs(at - spanMin) > kAreaEdgeTolerance && std::abs(at - spanMax) > kAreaEdgeTolerance)
+                continue;
             double lo = std::min(crossCoord(s.line.a), crossCoord(s.line.b));
             double hi = std::max(crossCoord(s.line.a), crossCoord(s.line.b));
             lo = std::max(lo, crossMin);
@@ -352,7 +391,7 @@ private:
                 };
                 double s0 = toS(x0), s1 = toS(x1);
                 if (s0 > s1) std::swap(s0, s1);
-                s.lineLoads.push_back({s0, s1, w, w, name});
+                s.lineLoads.push_back({s0, s1, w, w, name, origin});
             }
         }
         if (unsupported > 1.5)
@@ -432,14 +471,15 @@ private:
             if (const Beam* beam = doc_.beam(s.objectId); beam && !beam->memberId.empty())
                 if (const Member* m = findMember(beam->memberId)) {
                     const double w = m->selfWeightPlf();
-                    loads.line.push_back({0.0, loads.span, CaseLoads::of(w), CaseLoads::of(w), "beam self weight"});
+                    loads.line.push_back({0.0, loads.span, CaseLoads::of(w), CaseLoads::of(w), "beam self weight",
+                                          LoadOrigin::Beam});
                 }
         s.reactions = reactionsByCase(loads);
         const std::string label = s.label;
 
         const CaseLoads reaction[2] = {s.reactions.left, s.reactions.right};
         for (int i = 0; i < 2; ++i) {
-            PointLoad p{0.0, reaction[i], label};
+            PointLoad p{0.0, reaction[i], label, LoadOrigin::Beam};
             if (ends[i].target >= 0) {
                 SupportLoads& t = supports()[static_cast<size_t>(ends[i].target)];
                 p.position = std::clamp(t.line.project(ends[i].point), 0.0, 1.0) * t.length();
@@ -466,7 +506,8 @@ private:
             {
                 SupportLoads& s = supports()[i];
                 const double plf = wall->selfWeightPsf * toFeet(doc_.wallHeight(*wall));
-                s.selfWeight = {0.0, s.length(), CaseLoads::of(plf), CaseLoads::of(plf), "wall self weight"};
+                s.selfWeight = {0.0, s.length(), CaseLoads::of(plf), CaseLoads::of(plf),
+                                "Wall " + std::to_string(wall->id) + " self weight", LoadOrigin::Wall};
             }
             if (!below) continue; // bears on the foundation
 
@@ -496,6 +537,12 @@ bool SupportLoads::carriesRoofOnly() const {
     for (const auto& p : pointLoads)
         if (p.p[LoadCase::Live] > 0.0) return false;
     return true;
+}
+
+LineLoadSummary SupportLoads::bottomLoads() const {
+    std::vector<LineLoad> all = lineLoads;
+    if (selfWeight.length() > 0.0) all.push_back(selfWeight);
+    return summarize(all);
 }
 
 const SupportLoads* TakedownResult::find(SupportKind kind, ObjectId objectId) const {
@@ -545,7 +592,7 @@ BeamLoads headerLoads(const Document& doc, const TakedownResult& result, ObjectI
     const double above = doc.wallHeight(*wall) - (o->sillHeight + o->height);
     if (above > 0.0) {
         const double plf = wall->selfWeightPsf * toFeet(above);
-        b.line.push_back({0.0, b.span, CaseLoads::of(plf), CaseLoads::of(plf), "wall above header"});
+        b.line.push_back({0.0, b.span, CaseLoads::of(plf), CaseLoads::of(plf), "wall above header", LoadOrigin::Wall});
     }
     return b;
 }

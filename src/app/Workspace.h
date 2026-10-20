@@ -42,6 +42,9 @@ public:
     oa::ObjectId selection() const { return selection_; }
     void select(oa::ObjectId id);
 
+    // A short name people read, like "Wall 12" or "Window 7".
+    QString describe(oa::ObjectId id) const;
+
     // Load takedown for the current document, recomputed after any change.
     const oa::structural::TakedownResult& loads() const;
 

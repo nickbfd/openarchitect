@@ -30,4 +30,8 @@ double roofSnowPsf(const Site& site, double slopeRadians) {
     return ps;
 }
 
+double designSnowPsf(const Site& site, const RoofSettings& roof) {
+    return roof.customSnow ? std::max(roof.snowPsf, 0.0) : roofSnowPsf(site, roof.slopeRadians());
+}
+
 } // namespace oa::structural

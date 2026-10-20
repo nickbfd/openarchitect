@@ -199,3 +199,101 @@ TEST_CASE("header loads come from the wall above the opening") {
     REQUIRE_FALSE(picks.empty());
     CHECK(picks.front().member->d <= 7.25);
 }
+
+TEST_CASE("a single roof plane splits between its eave and high side") {
+    Document doc = Document::createDefault();
+    const ObjectId l1 = doc.levels[0].id;
+    const ObjectId low = addWall(doc, l1, {0, 0}, {240, 0});
+    const ObjectId high = addWall(doc, l1, {240, 144}, {0, 144});
+    RoofPlane p;
+    p.id = doc.newId();
+    p.levelId = l1;
+    p.a = {0, 0};
+    p.b = {240, 0};
+    p.run = 144;
+    p.pitch = 3;
+    p.overhang = 12;
+    doc.roofPlanes.push_back(p);
+
+    const auto result = runTakedown(doc);
+    const double dead = 15.0 / std::cos(std::atan(0.25));
+    const double eaveDepth = (144.0 + 12) * (144 + 12) / (2 * 144.0); // 84.5"
+    const double highDepth = (144.0 * 144 - 12 * 12) / (2 * 144.0);  // 71.5"
+    const auto eave = result.wall(low)->topLoads();
+    CHECK(eave.peakPlf[LoadCase::Dead] == Approx(dead * eaveDepth / 12).epsilon(1e-6));
+    CHECK(eave.peakPlf[LoadCase::RoofLive] == Approx(20 * eaveDepth / 12));
+    CHECK(result.wall(high)->topLoads().peakPlf[LoadCase::RoofLive] == Approx(20 * highDepth / 12));
+    // Together they carry the whole plane, overhang included.
+    CHECK((eaveDepth + highDepth) == Approx(144 + 12));
+    CHECK(result.warnings.empty());
+
+    // With nothing under the high side, it says so.
+    doc.remove(high);
+    const auto lonely = runTakedown(doc);
+    REQUIRE(lonely.warnings.size() == 1);
+    CHECK(lonely.warnings[0].find("of high side has no bearing") != std::string::npos);
+}
+
+TEST_CASE("truss ceilings bear on the eave walls, rafter ceilings on interior walls too") {
+    Box box;
+    const ObjectId middle = addWall(box.doc, box.l1, {0, 168}, {480, 168});
+    box.addRoof(RoofStyle::Gable).hasCeiling = true;
+
+    const auto rafters = runTakedown(box.doc);
+    // Ceiling joists span 14 ft to the middle wall: 7 ft to each eave wall.
+    CHECK(rafters.wall(box.south)->topLoads().peakPlf[LoadCase::Live] == Approx(70));
+    CHECK(rafters.wall(middle)->topLoads().peakPlf[LoadCase::Live] == Approx(140));
+
+    box.doc.roofs[0].framing = RoofFraming::Trusses;
+    box.doc.roofs[0].structuralRidge = true; // not possible with trusses, so ignored
+    const auto trusses = runTakedown(box.doc);
+    CHECK(trusses.wall(box.south)->topLoads().peakPlf[LoadCase::Live] == Approx(140));
+    CHECK(trusses.wall(middle)->lineLoads.empty());
+    CHECK(trusses.ridgeBeam(box.doc.roofs[0].id) == nullptr);
+    CHECK(trusses.wall(box.south)->topLoads().peakPlf[LoadCase::RoofLive] == Approx(20 * 15.5));
+}
+
+TEST_CASE("a custom roof snow load replaces the calculated one") {
+    Box box;
+    Roof& roof = box.addRoof(RoofStyle::Gable);
+    roof.customSnow = true;
+    roof.snowPsf = 50;
+    const auto south = runTakedown(box.doc).wall(box.south)->topLoads();
+    CHECK(south.peakPlf[LoadCase::Snow] == Approx(50 * 15.5));
+}
+
+TEST_CASE("first floor walls keep roof, floor and wall loads apart") {
+    Box box;
+    // A second floor wall on the south wall, a roof on Floor 2 and a floor between.
+    const ObjectId upper = addWall(box.doc, box.l2, {0, 0}, {480, 0});
+    addWall(box.doc, box.l2, {480, 336}, {0, 336});
+    Roof r;
+    r.id = box.doc.newId();
+    r.levelId = box.l2;
+    r.footprint = {{0, 0}, {480, 336}};
+    r.hasCeiling = false;
+    box.doc.roofs.push_back(r);
+    FloorPlatform floor;
+    floor.id = box.doc.newId();
+    floor.levelId = box.l2;
+    floor.area = {{0, 0}, {480, 336}};
+    floor.joistAxis = Axis::Y;
+    box.doc.platforms.push_back(floor);
+
+    const auto result = runTakedown(box.doc);
+    const SupportLoads* south = result.wall(box.south);
+    const auto groups = summarizeByOrigin(south->lineLoads);
+    REQUIRE(groups.size() == 3);
+    CHECK(groups[0].origin == LoadOrigin::Roof);
+    CHECK(groups[0].summary.peakPlf[LoadCase::Dead] == Approx(kDeadHoriz * 15.5).epsilon(1e-6));
+    CHECK(groups[1].origin == LoadOrigin::Floor);
+    CHECK(groups[1].summary.peakPlf[LoadCase::Live] == Approx(40 * 14));
+    CHECK(groups[2].origin == LoadOrigin::Wall);
+    const double wallPlf = 10.0 * 97.125 / 12.0;
+    CHECK(groups[2].summary.peakPlf[LoadCase::Dead] == Approx(wallPlf));
+    CHECK(result.wall(upper)->selfWeight.origin == LoadOrigin::Wall);
+
+    // The bottom of the wall adds its own weight to everything on top.
+    CHECK(south->bottomLoads().peakPlf[LoadCase::Dead] ==
+          Approx(south->topLoads().peakPlf[LoadCase::Dead] + wallPlf).epsilon(1e-6));
+}

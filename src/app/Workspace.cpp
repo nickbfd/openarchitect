@@ -86,6 +86,20 @@ void Workspace::select(oa::ObjectId id) {
     emit selectionChanged();
 }
 
+QString Workspace::describe(oa::ObjectId id) const {
+    const auto& d = doc_;
+    if (d.wall(id)) return QString("Wall %1").arg(id);
+    if (const oa::Opening* o = d.opening(id))
+        return QString("%1 %2").arg(o->kind == oa::OpeningKind::Door ? "Door" : "Window").arg(id);
+    if (d.beam(id)) return QString("Beam %1").arg(id);
+    if (d.roof(id)) return QString("Roof %1").arg(id);
+    if (d.roofPlane(id)) return QString("Roof plane %1").arg(id);
+    if (oa::Document::findIn(d.platforms, id)) return QString("Floor framing %1").arg(id);
+    if (const oa::Room* r = oa::Document::findIn(d.rooms, id))
+        return QString("Room \"%1\"").arg(QString::fromStdString(r->name));
+    return QString();
+}
+
 const oa::structural::TakedownResult& Workspace::loads() const {
     if (!loads_) loads_ = oa::structural::runTakedown(doc_);
     return *loads_;
@@ -99,11 +113,7 @@ void Workspace::validateState() {
         emit currentLevelChanged();
     }
     if (selection_ == oa::kNoId) return;
-    const auto& d = doc_;
-    const bool exists = d.wall(selection_) || d.opening(selection_) || d.beam(selection_) ||
-                        d.roof(selection_) || oa::Document::findIn(d.rooms, selection_) ||
-                        oa::Document::findIn(d.platforms, selection_);
-    if (!exists) {
+    if (!doc_.contains(selection_) || doc_.level(selection_)) {
         selection_ = oa::kNoId;
         emit selectionChanged();
     }

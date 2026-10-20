@@ -11,5 +11,8 @@ namespace oa::structural {
 double flatRoofSnowPsf(const Site& site);
 double slopeFactorCs(double slopeRadians, double thermalCt);
 double roofSnowPsf(const Site& site, double slopeRadians);
+// The snow a roof is designed for: its custom value if it has one,
+// otherwise the balanced snow calculated from the site and its slope.
+double designSnowPsf(const Site& site, const RoofSettings& roof);
 
 } // namespace oa::structural

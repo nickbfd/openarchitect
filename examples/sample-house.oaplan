@@ -13,6 +13,19 @@
         "id": 16,
         "levelId": 1,
         "memberId": ""
+      },
+      {
+        "a": [
+          0.0,
+          -72.0
+        ],
+        "b": [
+          192.0,
+          -72.0
+        ],
+        "id": 21,
+        "levelId": 1,
+        "memberId": ""
       }
     ],
     "levels": [
@@ -32,7 +45,7 @@
       }
     ],
     "name": "Sample house",
-    "nextId": 35,
+    "nextId": 38,
     "openings": [
       {
         "height": 80.0,
@@ -99,47 +112,47 @@
       },
       {
         "height": 48.0,
-        "id": 26,
+        "id": 29,
         "kind": "window",
         "offset": 96.0,
         "sillHeight": 36.0,
-        "wallId": 21,
+        "wallId": 24,
         "width": 48.0
-      },
-      {
-        "height": 48.0,
-        "id": 27,
-        "kind": "window",
-        "offset": 384.0,
-        "sillHeight": 36.0,
-        "wallId": 21,
-        "width": 48.0
-      },
-      {
-        "height": 48.0,
-        "id": 28,
-        "kind": "window",
-        "offset": 168.0,
-        "sillHeight": 36.0,
-        "wallId": 22,
-        "width": 36.0
-      },
-      {
-        "height": 48.0,
-        "id": 29,
-        "kind": "window",
-        "offset": 120.0,
-        "sillHeight": 36.0,
-        "wallId": 23,
-        "width": 36.0
       },
       {
         "height": 48.0,
         "id": 30,
         "kind": "window",
+        "offset": 384.0,
+        "sillHeight": 36.0,
+        "wallId": 24,
+        "width": 48.0
+      },
+      {
+        "height": 48.0,
+        "id": 31,
+        "kind": "window",
+        "offset": 168.0,
+        "sillHeight": 36.0,
+        "wallId": 25,
+        "width": 36.0
+      },
+      {
+        "height": 48.0,
+        "id": 32,
+        "kind": "window",
+        "offset": 120.0,
+        "sillHeight": 36.0,
+        "wallId": 26,
+        "width": 36.0
+      },
+      {
+        "height": 48.0,
+        "id": 33,
+        "kind": "window",
         "offset": 360.0,
         "sillHeight": 36.0,
-        "wallId": 23,
+        "wallId": 26,
         "width": 36.0
       }
     ],
@@ -156,16 +169,41 @@
           ]
         },
         "deadPsf": 10.0,
-        "id": 33,
+        "id": 36,
         "joistAxis": "y",
         "levelId": 2,
         "livePsf": 40.0
+      }
+    ],
+    "roofPlanes": [
+      {
+        "a": [
+          0.0,
+          -72.0
+        ],
+        "atticLivePsf": 10.0,
+        "b": [
+          192.0,
+          -72.0
+        ],
+        "ceilingDeadPsf": 10.0,
+        "customSnow": false,
+        "deadPsf": 15.0,
+        "framing": "rafters",
+        "hasCeiling": false,
+        "id": 22,
+        "levelId": 1,
+        "overhang": 12.0,
+        "pitch": 3.0,
+        "run": 72.0,
+        "snowPsf": 0.0
       }
     ],
     "roofs": [
       {
         "atticLivePsf": 10.0,
         "ceilingDeadPsf": 10.0,
+        "customSnow": false,
         "deadPsf": 15.0,
         "footprint": {
           "max": [
@@ -177,12 +215,14 @@
             0.0
           ]
         },
+        "framing": "rafters",
         "hasCeiling": true,
-        "id": 34,
+        "id": 37,
         "levelId": 2,
         "overhang": 18.0,
         "pitch": 6.0,
         "ridgeAxis": "x",
+        "snowPsf": 0.0,
         "structuralRidge": false,
         "style": "gable"
       }
@@ -285,7 +325,31 @@
         "type": "living"
       },
       {
-        "id": 31,
+        "id": 23,
+        "levelId": 1,
+        "name": "Porch",
+        "outline": [
+          [
+            0.0,
+            -72.0
+          ],
+          [
+            192.0,
+            -72.0
+          ],
+          [
+            192.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0
+          ]
+        ],
+        "type": "deck"
+      },
+      {
+        "id": 34,
         "levelId": 2,
         "name": "Bedroom 1",
         "outline": [
@@ -309,7 +373,7 @@
         "type": "bedroom"
       },
       {
-        "id": 32,
+        "id": 35,
         "levelId": 2,
         "name": "Bedroom 2",
         "outline": [
@@ -447,55 +511,55 @@
         ],
         "bearing": true,
         "height": 0.0,
-        "id": 21,
-        "levelId": 2,
-        "selfWeightPsf": 10.0,
-        "thickness": 5.5
-      },
-      {
-        "a": [
-          480.0,
-          0.0
-        ],
-        "b": [
-          480.0,
-          336.0
-        ],
-        "bearing": true,
-        "height": 0.0,
-        "id": 22,
-        "levelId": 2,
-        "selfWeightPsf": 10.0,
-        "thickness": 5.5
-      },
-      {
-        "a": [
-          480.0,
-          336.0
-        ],
-        "b": [
-          0.0,
-          336.0
-        ],
-        "bearing": true,
-        "height": 0.0,
-        "id": 23,
-        "levelId": 2,
-        "selfWeightPsf": 10.0,
-        "thickness": 5.5
-      },
-      {
-        "a": [
-          0.0,
-          336.0
-        ],
-        "b": [
-          0.0,
-          0.0
-        ],
-        "bearing": true,
-        "height": 0.0,
         "id": 24,
+        "levelId": 2,
+        "selfWeightPsf": 10.0,
+        "thickness": 5.5
+      },
+      {
+        "a": [
+          480.0,
+          0.0
+        ],
+        "b": [
+          480.0,
+          336.0
+        ],
+        "bearing": true,
+        "height": 0.0,
+        "id": 25,
+        "levelId": 2,
+        "selfWeightPsf": 10.0,
+        "thickness": 5.5
+      },
+      {
+        "a": [
+          480.0,
+          336.0
+        ],
+        "b": [
+          0.0,
+          336.0
+        ],
+        "bearing": true,
+        "height": 0.0,
+        "id": 26,
+        "levelId": 2,
+        "selfWeightPsf": 10.0,
+        "thickness": 5.5
+      },
+      {
+        "a": [
+          0.0,
+          336.0
+        ],
+        "b": [
+          0.0,
+          0.0
+        ],
+        "bearing": true,
+        "height": 0.0,
+        "id": 27,
         "levelId": 2,
         "selfWeightPsf": 10.0,
         "thickness": 5.5
@@ -511,7 +575,7 @@
         ],
         "bearing": false,
         "height": 0.0,
-        "id": 25,
+        "id": 28,
         "levelId": 2,
         "selfWeightPsf": 8.0,
         "thickness": 4.5

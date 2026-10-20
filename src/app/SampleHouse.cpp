@@ -80,6 +80,25 @@ Document makeSampleHouse() {
     room(d, l1, "Office", RoomType::Bedroom, {{0, mid}, {feet(16), D}});
     room(d, l1, "Dining", RoomType::Living, {{feet(16), mid}, {feet(24), D}});
 
+    // Front porch: a single roof plane from a beam on posts up to the south wall.
+    const double porch = feet(6);
+    Beam porchBeam;
+    porchBeam.id = d.newId();
+    porchBeam.levelId = l1;
+    porchBeam.a = {0, -porch};
+    porchBeam.b = {feet(16), -porch};
+    d.beams.push_back(porchBeam);
+    RoofPlane porchRoof;
+    porchRoof.id = d.newId();
+    porchRoof.levelId = l1;
+    porchRoof.a = porchBeam.a;
+    porchRoof.b = porchBeam.b;
+    porchRoof.run = porch;
+    porchRoof.pitch = 3.0;
+    porchRoof.overhang = 12.0;
+    d.roofPlanes.push_back(porchRoof);
+    room(d, l1, "Porch", RoomType::Deck, {{0, -porch}, {feet(16), 0}});
+
     // Floor 2
     const ObjectId south2 = wall(d, l2, {0, 0}, {W, 0});
     const ObjectId east2 = wall(d, l2, {W, 0}, {W, D});

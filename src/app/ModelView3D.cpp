@@ -48,6 +48,10 @@ ModelView3D::ModelView3D(Workspace* ws, QWidget* parent) : QOpenGLWidget(parent)
         meshDirty_ = true;
         update();
     });
+    connect(ws_, &Workspace::selectionChanged, this, [this] {
+        meshDirty_ = true;
+        update();
+    });
 }
 
 ModelView3D::~ModelView3D() {
@@ -72,7 +76,7 @@ void ModelView3D::initializeGL() {
 }
 
 void ModelView3D::rebuild() {
-    mesh_ = buildMesh(ws_->doc());
+    mesh_ = buildMesh(ws_->doc(), ws_->selection());
     vertexCount_ = static_cast<int>(mesh_.vertices.size());
 
     QOpenGLVertexArrayObject::Binder bind(&vao_);
@@ -114,30 +118,57 @@ QVector3D ModelView3D::eye() const {
     return target_ + dir * distance_;
 }
 
-void ModelView3D::paintGL() {
-    if (meshDirty_) rebuild();
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    if (vertexCount_ == 0) return;
-
+QMatrix4x4 ModelView3D::viewProjection() const {
     QMatrix4x4 projection;
     projection.perspective(45.0f, float(width()) / float(std::max(height(), 1)), distance_ * 0.01f,
                            distance_ * 20.0f);
     QMatrix4x4 view;
     view.lookAt(eye(), target_, QVector3D(0, 0, 1));
+    return projection * view;
+}
+
+void ModelView3D::paintGL() {
+    if (meshDirty_) rebuild();
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    if (vertexCount_ == 0) return;
 
     program_.bind();
-    program_.setUniformValue("mvp", projection * view);
+    program_.setUniformValue("mvp", viewProjection());
     program_.setUniformValue("lightDir", QVector3D(0.4f, -0.6f, 0.7f).normalized());
     QOpenGLVertexArrayObject::Binder bind(&vao_);
     glDrawArrays(GL_TRIANGLES, 0, vertexCount_);
 }
 
-void ModelView3D::mousePressEvent(QMouseEvent* e) { lastPos_ = e->position().toPoint(); }
+void ModelView3D::mousePressEvent(QMouseEvent* e) {
+    lastPos_ = pressPos_ = e->position().toPoint();
+    dragged_ = false;
+}
+
+void ModelView3D::mouseReleaseEvent(QMouseEvent* e) {
+    if (e->button() == Qt::LeftButton && !dragged_) pickAt(e->position().toPoint());
+}
+
+// Casts a ray through the clicked pixel and selects what it hits first,
+// switching to that object's level so the plan and properties follow.
+void ModelView3D::pickAt(QPoint pos) {
+    if (meshDirty_) return;
+    const QMatrix4x4 inverse = viewProjection().inverted();
+    const float x = 2.0f * float(pos.x()) / float(std::max(width(), 1)) - 1.0f;
+    const float y = 1.0f - 2.0f * float(pos.y()) / float(std::max(height(), 1));
+    const QVector3D nearPoint = inverse.map(QVector3D(x, y, -1.0f));
+    const QVector3D farPoint = inverse.map(QVector3D(x, y, 1.0f));
+    const QVector3D dir = (farPoint - nearPoint).normalized();
+    const oa::ObjectId hit = pickMesh(mesh_, {nearPoint.x(), nearPoint.y(), nearPoint.z()}, {dir.x(), dir.y(), dir.z()});
+    if (hit != oa::kNoId) ws_->setCurrentLevel(ws_->doc().levelOf(hit));
+    ws_->select(hit);
+}
 
 void ModelView3D::mouseMoveEvent(QMouseEvent* e) {
     const QPoint pos = e->position().toPoint();
     const QPoint delta = pos - lastPos_;
     lastPos_ = pos;
+    if ((pos - pressPos_).manhattanLength() > 3) dragged_ = true;
+    if (!dragged_) return;
     if (e->buttons() & Qt::LeftButton) {
         yaw_ -= delta.x() * 0.4f;
         pitch_ = std::clamp(pitch_ + delta.y() * 0.4f, -5.0f, 89.0f);

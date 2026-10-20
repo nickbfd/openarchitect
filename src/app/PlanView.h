@@ -6,6 +6,7 @@
 #include <QWidget>
 
 #include <optional>
+#include <vector>
 
 class Workspace;
 
@@ -14,7 +15,7 @@ class Workspace;
 class PlanView : public QWidget {
     Q_OBJECT
 public:
-    enum class Tool { Select, Wall, Door, Window, Beam, Floor, Roof, Room };
+    enum class Tool { Select, Wall, Door, Window, Beam, Floor, Roof, Room, RoofPlane };
 
     explicit PlanView(Workspace* ws, QWidget* parent = nullptr);
 
@@ -39,6 +40,8 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent* e) override;
     void wheelEvent(QWheelEvent* e) override;
     void keyPressEvent(QKeyEvent* e) override;
+    // Tab cycles through stacked objects instead of moving focus.
+    bool focusNextPrevChild(bool) override { return false; }
 
 private:
     QPointF toScreen(oa::Vec2 p) const;
@@ -48,7 +51,14 @@ private:
     // Snaps a world point to wall ends, then angle and length (when drawing
     // from `from`), then the grid. Holding Ctrl disables snapping.
     oa::Vec2 snap(oa::Vec2 p, std::optional<oa::Vec2> from, Qt::KeyboardModifiers mods) const;
+    // Everything under a point on the current level, topmost first:
+    // beams, openings, walls, roof planes, roofs, floor framing, rooms.
+    std::vector<oa::ObjectId> pickAll(oa::Vec2 p) const;
     oa::ObjectId pick(oa::Vec2 p) const;
+    // Selects `id` from the stack `hits`, noting where it sits in the stack.
+    void selectFromStack(const std::vector<oa::ObjectId>& hits, oa::ObjectId id);
+    void cycleStack();
+    void showStackMenu(QPointF screenPos, const std::vector<oa::ObjectId>& hits);
     const oa::Wall* wallNear(oa::Vec2 p, double pixelTolerance) const;
 
     void drawGrid(QPainter& g) const;
@@ -59,12 +69,14 @@ private:
     void drawOpenings(QPainter& g) const;
     void drawBeams(QPainter& g) const;
     void drawRoofs(QPainter& g) const;
+    void drawRoofPlanes(QPainter& g) const;
     void drawLoads(QPainter& g) const;
     void drawToolPreview(QPainter& g) const;
     void drawLengthLabel(QPainter& g, oa::Vec2 a, oa::Vec2 b) const;
 
     void finishRect(oa::Vec2 a, oa::Vec2 b);
     void placeOpening(oa::Vec2 p, oa::OpeningKind kind);
+    void finishRoofPlane(oa::Vec2 a, oa::Vec2 b, oa::Vec2 high);
 
     Workspace* ws_;
     Tool tool_ = Tool::Select;
@@ -76,6 +88,7 @@ private:
 
     oa::Vec2 cursor_;
     std::optional<oa::Vec2> anchor_; // first click of a two-point tool
+    std::optional<oa::Vec2> anchor2_; // second click of the roof plane tool (end of the eave)
     QPointF panStart_;
     bool panning_ = false;
 
@@ -85,5 +98,11 @@ private:
     Drag drag_ = Drag::None;
     oa::Vec2 dragStart_;
     std::optional<oa::Document> preview_;
+
+    // Objects stacked under the last click, so clicking the same spot again
+    // (or Tab) selects the next one down.
+    std::vector<oa::ObjectId> stack_;
+    bool cycleOnRelease_ = false;
+    QString stackHint_;
     const oa::Document& doc() const;
 };

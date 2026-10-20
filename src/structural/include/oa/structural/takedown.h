@@ -28,6 +28,8 @@ struct SupportLoads {
     double length() const { return line.length(); }
     // Peak plf per case on top of the member, and the governing combination.
     LineLoadSummary topLoads() const { return summarize(lineLoads); }
+    // Peak plf at the bottom of a wall: everything on top plus its own weight.
+    LineLoadSummary bottomLoads() const;
     bool carriesRoofOnly() const;
 };
 
@@ -45,7 +47,9 @@ struct TakedownResult {
 //  - roofs: dead load on the surface converted to horizontal projection,
 //    20 psf roof live load (IRC R301.6), balanced snow from the site (ASCE 7);
 //    gable eaves take half the rafter run plus overhang, hip roofs split the
-//    footprint by its straight skeleton (45 degree hips in plan);
+//    footprint by its straight skeleton (45 degree hips in plan); a single
+//    roof plane splits between its eave and high bearing lines;
+//  - trusses span eave to eave, so their ceiling bears on the eave walls only;
 //  - ceilings and floors: one-way framing, each support taking half the
 //    distance to its neighbors (or the cantilever to the edge);
 //  - walls add their self weight and pass everything to the wall or beam
