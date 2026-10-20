@@ -82,7 +82,7 @@ void ModelView3D::initializeGL() {
 }
 
 void ModelView3D::rebuild() {
-    mesh_ = buildMesh(ws_->doc(), ws_->selection(), showFraming_);
+    mesh_ = buildMesh(ws_->doc(), ws_->selectedIds(), showFraming_);
     vertexCount_ = static_cast<int>(mesh_.vertices.size());
 
     QOpenGLVertexArrayObject::Binder bind(&vao_);

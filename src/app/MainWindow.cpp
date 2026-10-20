@@ -63,6 +63,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ws_(new Workspace
     connect(plan_, &PlanView::statusMessage, this, [this](const QString& m) { statusBar()->showMessage(m); });
 
     createActions();
+    (ws_->doc().dimensionTo == DimensionTo::FramingEdge ? dimEdge_ : dimCenter_)->setChecked(true);
     refreshLevels();
     refreshWallTypes();
     updateTitle();
@@ -71,6 +72,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ws_(new Workspace
     connect(ws_, &Workspace::documentChanged, this, [this] {
         refreshLevels();
         refreshWallTypes();
+        (ws_->doc().dimensionTo == DimensionTo::FramingEdge ? dimEdge_ : dimCenter_)->setChecked(true);
         updateUndoActions();
     });
     connect(ws_, &Workspace::currentLevelChanged, this, &MainWindow::refreshLevels);
@@ -223,6 +225,14 @@ void MainWindow::createActions() {
     QMenu* dims = category("Dimensions", {PlanView::Tool::Dimension});
     dims->addAction(dimension);
     dims->addAction(autoDims);
+    dims->addSection("Walls measure to");
+    auto* dimTo = new QActionGroup(this);
+    dimEdge_ = dims->addAction("Outside edge of framing", this, [this] { setDimensionTo(DimensionTo::FramingEdge); });
+    dimCenter_ = dims->addAction("Center of framing", this, [this] { setDimensionTo(DimensionTo::FramingCenter); });
+    for (QAction* a : {dimEdge_, dimCenter_}) {
+        a->setCheckable(true);
+        dimTo->addAction(a);
+    }
     QMenu* site = category("Terrain", {PlanView::Tool::Elevation});
     site->addAction(elevation);
     site->addAction("Clear the terrain", this, [this] {
@@ -339,7 +349,15 @@ void MainWindow::autoDimensions() {
             d.dimensions.push_back(x);
         }
     });
-    statusBar()->showMessage(QString("Added %1 dimensions. Run it again after changing walls to redo them.").arg(dims.size()));
+    statusBar()->showMessage(QString("Added %1 dimensions. Run it again after changing walls to redo them; dimensions you have edited are kept.").arg(dims.size()));
+}
+
+// Changes where walls are measured to, and redoes the automatic exterior
+// dimensions on every level that has them.
+void MainWindow::setDimensionTo(DimensionTo to) {
+    if (ws_->doc().dimensionTo == to) return;
+    ws_->edit(to == DimensionTo::FramingEdge ? "Dimension to edge of framing" : "Dimension to center of framing",
+              [to](Document& d) { oa::setDimensionTo(d, to); });
 }
 
 void MainWindow::updateTitle() {

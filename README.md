@@ -14,7 +14,8 @@ Windows and Linux are first-class platforms. macOS is built and tested in CI on 
 - **Grouped toolbar**: the tools sit in drop-down menus for Walls (exterior and interior wall types, room divider), Doors and Windows (common sizes like 3068 or 3040), Roofs, Framing, Dimensions and Terrain.
 - **Typed lengths**: while drawing a wall, room divider or beam, start typing a length (`12'6`, `150`, `14' 3 1/2"`) and press Enter. The new piece runs toward the cursor, snapped to 15 degrees.
 - **Door and window labels**: each opening is labeled with its size in the usual shorthand (3068 is 3'-0" by 6'-8"). Turn them off under View.
-- **Dimensions**: draw your own with the Dimension tool, or use **Dimension exterior walls** for rows of opening, corner and overall dimensions around the outside. Drag a dimension to move it in or out.
+- **Dimensions**: draw your own with the Dimension tool, or use **Dimension exterior walls** for rows of opening, corner and overall dimensions around the outside. Walls measure to the outside edge of their framing or to its center (Dimensions menu). Select a dimension to get its nodes: drag a square to move that end to another point (it snaps to framing corners, openings, posts and beam ends, and joined dimensions follow), or drag the diamond or the line to move the whole string in or out.
+- **Box selection**: hold Shift and drag a box to select everything entirely inside it. With a tool picked first, only that kind is selected, so pick Windows and Shift-drag over the whole plan to select every window. Shift-click adds or removes one object. Edit what they share in Properties, drag one to move them all, or press Delete.
 - **Terrain**: place elevation points on the ground level, and contours are drawn between them at the interval you set (every fifth one heavier and labeled). The ground shows in 3D.
 - **Room floor systems**: each room can keep the level's floor framing, have its own joists (a flush shower framed deeper or dropped), or be a concrete slab (a garage or patio), with its own loads and a drop below the level's floor. Slabs show in 3D.
 - **Wall types**: named build-ups (6" and 4" exterior, 4" and 6" interior, room divider) with stud size, stud spacing, insulation and finish layers. Walls take their thickness and weight from their type, and you can make your own types.
@@ -45,7 +46,7 @@ To build only the model and structural libraries and their tests (no Qt needed):
 
 | Key | Tool |
 | --- | --- |
-| S | Select (drag to move, drag a wall end to stretch; click again, Tab or right-click for stacked objects) |
+| S | Select (drag to move, drag a wall end to stretch; click again, Tab or right-click for stacked objects; Shift-drag a box to select several) |
 | W | Wall (click, click, keep clicking; type a length and press Enter; right-click or Esc to stop; Ctrl disables snapping) |
 | I | Interior wall |
 | D / N | Door / Window (click on a wall) |

@@ -94,6 +94,19 @@ private:
     void drawToolPreview(QPainter& g) const;
     void drawLengthLabel(QPainter& g, oa::Vec2 a, oa::Vec2 b) const;
 
+    // Shift box selection: the objects entirely inside a box, limited to
+    // the kind the current tool draws (everything with Select).
+    bool toolAccepts(oa::ObjectId id) const;
+    std::vector<oa::ObjectId> boxPick(QPointF a, QPointF b) const;
+    void finishBox(QPointF a, QPointF b, bool add);
+    // Snapping for dimension ends: wall framing corners, openings, posts and
+    // beam ends, then the usual snapping.
+    std::optional<oa::Vec2> dimensionSnap(oa::Vec2 p, Qt::KeyboardModifiers mods) const;
+    // The node of the selected dimension under a screen point.
+    enum class Drag;
+    std::optional<Drag> dimensionHandleAt(QPointF pos) const;
+    void drawBox(QPainter& g) const;
+
     void finishRect(oa::Vec2 a, oa::Vec2 b);
     void placeOpening(oa::Vec2 p, oa::OpeningKind kind);
     void finishRoofPlane(oa::Vec2 a, oa::Vec2 b, oa::Vec2 high);
@@ -133,11 +146,16 @@ private:
 
     // Dragging in the select tool edits a preview copy; releasing the
     // mouse commits it as one undoable step.
-    enum class Drag { None, Move, EndA, EndB, Vertex, Edge };
+    enum class Drag { None, Move, EndA, EndB, Vertex, Edge, DimA, DimB, Box };
     Drag drag_ = Drag::None;
     int dragIndex_ = -1; // the roof plane corner or edge being dragged
     oa::Vec2 dragStart_;
     std::optional<oa::Document> preview_;
+    QPointF boxStart_, boxEnd_; // screen corners of a Shift box selection
+    bool boxAdds_ = false;      // the box adds to the selection instead of replacing it
+    // Dimension snap points of the current level, rebuilt when the plan changes.
+    mutable std::vector<oa::Vec2> dimensionSnaps_;
+    mutable bool dimensionSnapsValid_ = false;
 
     // Objects stacked under the last click, so clicking the same spot again
     // (or Tab) selects the next one down.

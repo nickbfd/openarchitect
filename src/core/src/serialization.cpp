@@ -24,6 +24,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(RoofStyle, {{RoofStyle::Gable, "gable"}, {RoofStyle
 NLOHMANN_JSON_SERIALIZE_ENUM(RoofFraming, {{RoofFraming::Rafters, "rafters"}, {RoofFraming::Trusses, "trusses"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(WallKind, {{WallKind::Exterior, "exterior"}, {WallKind::Interior, "interior"},
                                        {WallKind::RoomDivider, "roomDivider"}})
+NLOHMANN_JSON_SERIALIZE_ENUM(DimensionTo, {{DimensionTo::FramingEdge, "framingEdge"}, {DimensionTo::FramingCenter, "framingCenter"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(Axis, {{Axis::X, "x"}, {Axis::Y, "y"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(FloorSystemKind, {{FloorSystemKind::LevelFraming, "levelFraming"},
                                                {FloorSystemKind::Joists, "joists"},
@@ -63,7 +64,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Beam, id, levelId, a, b, memberI
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Site, groundSnowPsf, exposureCe, thermalCt, importanceIs)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Document, name, site, levels, wallTypes, walls, openings,
                                                 rooms, platforms, roofs, roofPlanes, beams, posts,
-                                                dimensions, terrain, nextId)
+                                                dimensions, dimensionTo, terrain, nextId)
 
 namespace {
 

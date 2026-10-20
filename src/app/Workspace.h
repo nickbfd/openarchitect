@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <optional>
+#include <vector>
 
 // The open plan as the UI sees it: the document, its undo history, the file
 // it came from, the current level and selection, and cached load results.
@@ -39,8 +40,13 @@ public:
     oa::ObjectId currentLevel() const { return currentLevel_; }
     void setCurrentLevel(oa::ObjectId id);
 
-    oa::ObjectId selection() const { return selection_; }
+    // The selection: usually one object, or several picked with a Shift box.
+    // selection() is the first of them, kNoId when nothing is selected.
+    oa::ObjectId selection() const { return selection_.empty() ? oa::kNoId : selection_.front(); }
+    const std::vector<oa::ObjectId>& selectedIds() const { return selection_; }
+    bool isSelected(oa::ObjectId id) const;
     void select(oa::ObjectId id);
+    void selectMany(std::vector<oa::ObjectId> ids);
 
     // A short name people read, like "Wall 12" or "Window 7".
     QString describe(oa::ObjectId id) const;
@@ -62,6 +68,6 @@ private:
     oa::UndoStack undo_;
     QString filePath_;
     oa::ObjectId currentLevel_ = oa::kNoId;
-    oa::ObjectId selection_ = oa::kNoId;
+    std::vector<oa::ObjectId> selection_;
     mutable std::optional<oa::structural::TakedownResult> loads_;
 };

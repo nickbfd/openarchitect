@@ -2,6 +2,7 @@
 
 #include "Workspace.h"
 
+#include "oa/core/dimensions.h"
 #include "oa/core/units.h"
 #include "oa/structural/members.h"
 #include "oa/structural/posts.h"
@@ -14,9 +15,12 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QScrollArea>
 #include <QTimer>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 using namespace oa;
 using namespace oa::structural;
@@ -94,7 +98,8 @@ void PropertiesPanel::rebuild() {
 
     const Document& d = ws_->doc();
     const ObjectId id = ws_->selection();
-    if (const Wall* w = d.wall(id)) showWall(*w);
+    if (ws_->selectedIds().size() > 1) showMany(ws_->selectedIds());
+    else if (const Wall* w = d.wall(id)) showWall(*w);
     else if (const Opening* o = d.opening(id)) showOpening(*o);
     else if (const Beam* b = d.beam(id)) showBeam(*b);
     else if (const Post* p = d.post(id)) showPost(*p);
@@ -203,6 +208,167 @@ void PropertiesPanel::button(const QString& caption, std::function<void()> onCli
     form_->addRow(b);
 }
 
+void PropertiesPanel::lengthAll(const QString& label, const Ids& ids,
+                                std::function<double(const Document&, ObjectId)> get,
+                                std::function<void(Document&, ObjectId, double)> set, double minimum) {
+    const Document& doc = ws_->doc();
+    const double first = get(doc, ids.front());
+    const bool same = std::all_of(ids.begin(), ids.end(), [&](ObjectId id) { return std::abs(get(doc, id) - first) < 1e-6; });
+    auto* edit = new QLineEdit(same ? feetInches(first) : QString());
+    edit->setPlaceholderText("varies");
+    edit->setToolTip("Type feet and inches, like 12' 6 1/2\" or 150\". Applies to all of them.");
+    const QString shown = edit->text();
+    connect(edit, &QLineEdit::editingFinished, this, [this, edit, shown, set, minimum, label, ids] {
+        if (edit->text() == shown) return;
+        auto parsed = parseLength(edit->text().toStdString());
+        if (!parsed || *parsed < minimum) {
+            edit->setText(shown);
+            return;
+        }
+        const double v = *parsed;
+        apply("Change " + label.toLower(), [set, v, ids](Document& d) {
+            for (ObjectId id : ids) set(d, id, v);
+        });
+    });
+    form_->addRow(label, edit);
+}
+
+void PropertiesPanel::choiceAll(const QString& label, const QStringList& items, const Ids& ids,
+                                std::function<int(const Document&, ObjectId)> get,
+                                std::function<void(Document&, ObjectId, int)> set) {
+    const Document& doc = ws_->doc();
+    const int first = get(doc, ids.front());
+    const bool same = std::all_of(ids.begin(), ids.end(), [&](ObjectId id) { return get(doc, id) == first; });
+    auto* combo = new QComboBox;
+    combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    combo->setMinimumContentsLength(12);
+    combo->addItems(items);
+    if (!same) combo->insertItem(0, "Varies");
+    combo->setCurrentIndex(same ? first : 0);
+    connect(combo, &QComboBox::activated, this, [this, set, label, ids, same, first](int v) {
+        if (!same) {
+            if (v == 0) return;
+            --v;
+        } else if (v == first) {
+            return;
+        }
+        apply("Change " + label.toLower(), [set, v, ids](Document& d) {
+            for (ObjectId id : ids) set(d, id, v);
+        });
+    });
+    form_->addRow(label, combo);
+}
+
+// Several objects selected with a Shift box or Shift-click. When they are
+// all one kind, the rows they share edit them all together.
+void PropertiesPanel::showMany(const Ids& ids) {
+    const Document& doc = ws_->doc();
+    auto all = [&](auto test) { return std::all_of(ids.begin(), ids.end(), [&](ObjectId id) { return test(id); }); };
+    const auto isDoor = [&](ObjectId id) { return doc.opening(id) && doc.opening(id)->kind == OpeningKind::Door; };
+    const auto isWindow = [&](ObjectId id) { return doc.opening(id) && doc.opening(id)->kind == OpeningKind::Window; };
+
+    if (all([&](ObjectId id) { return doc.opening(id) != nullptr; })) {
+        heading(QString("%1 %2").arg(ids.size()).arg(all(isDoor) ? "doors" : all(isWindow) ? "windows" : "doors and windows"));
+        lengthAll("Width", ids, [](const Document& d, ObjectId id) { return d.opening(id)->width; },
+                  [](Document& d, ObjectId id, double v) { d.opening(id)->width = v; }, 1.0);
+        lengthAll("Height", ids, [](const Document& d, ObjectId id) { return d.opening(id)->height; },
+                  [](Document& d, ObjectId id, double v) { d.opening(id)->height = v; }, 1.0);
+        lengthAll("Sill height", ids, [](const Document& d, ObjectId id) { return d.opening(id)->sillHeight; },
+                  [](Document& d, ObjectId id, double v) { d.opening(id)->sillHeight = v; });
+        lengthAll("Top height", ids, [](const Document& d, ObjectId id) { return d.opening(id)->topHeight(); },
+                  [](Document& d, ObjectId id, double v) {
+                      Opening* x = d.opening(id);
+                      x->height = std::max(1.0, v - x->sillHeight);
+                  }, 1.0);
+        button("Clear headers", [this, ids] {
+            apply("Clear headers", [ids](Document& d) {
+                for (ObjectId id : ids) d.opening(id)->headerMemberId.clear();
+            });
+        });
+    } else if (all([&](ObjectId id) { return doc.wall(id) != nullptr; })) {
+        heading(QString("%1 walls").arg(ids.size()));
+        QStringList types{"Custom (set by hand)"};
+        std::vector<ObjectId> typeIds{kNoId};
+        for (const auto& t : doc.wallTypes) {
+            types << QString::fromStdString(t.name);
+            typeIds.push_back(t.id);
+        }
+        choiceAll("Wall type", types, ids,
+                  [typeIds](const Document& d, ObjectId id) {
+                      const auto it = std::find(typeIds.begin(), typeIds.end(), d.wall(id)->wallTypeId);
+                      return it == typeIds.end() ? 0 : static_cast<int>(it - typeIds.begin());
+                  },
+                  [typeIds](Document& d, ObjectId id, int v) {
+                      Wall* x = d.wall(id);
+                      const bool wasDivider = x->roomDivider;
+                      x->wallTypeId = typeIds[v];
+                      const WallType* t = d.wallType(x->wallTypeId);
+                      x->roomDivider = t && t->isDivider();
+                      if (wasDivider && !x->roomDivider) {
+                          x->bearing = !t || t->kind == WallKind::Exterior;
+                          if (!t) x->thickness = 5.5;
+                      }
+                  });
+        lengthAll("Height (0 = level)", ids, [](const Document& d, ObjectId id) { return d.wall(id)->height; },
+                  [](Document& d, ObjectId id, double v) { d.wall(id)->height = v; });
+        choiceAll("Bearing", {"No", "Yes"}, ids, [](const Document& d, ObjectId id) { return d.wall(id)->bearing ? 1 : 0; },
+                  [](Document& d, ObjectId id, int v) { d.wall(id)->bearing = v == 1; });
+    } else if (all([&](ObjectId id) { return doc.post(id) != nullptr; })) {
+        heading(QString("%1 posts").arg(ids.size()));
+        QStringList sizes;
+        std::vector<std::string> memberIds;
+        for (const auto& m : postCatalog()) {
+            sizes << QString::fromStdString(m.name);
+            memberIds.push_back(m.id);
+        }
+        choiceAll("Size", sizes, ids,
+                  [memberIds](const Document& d, ObjectId id) {
+                      const auto it = std::find(memberIds.begin(), memberIds.end(), d.post(id)->memberId);
+                      return it == memberIds.end() ? 0 : static_cast<int>(it - memberIds.begin());
+                  },
+                  [memberIds](Document& d, ObjectId id, int v) { d.post(id)->memberId = memberIds[v]; });
+        lengthAll("Height (0 = level)", ids, [](const Document& d, ObjectId id) { return d.post(id)->height; },
+                  [](Document& d, ObjectId id, double v) { d.post(id)->height = v; });
+    } else if (all([&](ObjectId id) { return doc.dimension(id) != nullptr; })) {
+        heading(QString("%1 dimensions").arg(ids.size()));
+        lengthAll("Offset from the points", ids, [](const Document& d, ObjectId id) { return std::abs(d.dimension(id)->offset); },
+                  [](Document& d, ObjectId id, double v) {
+                      Dimension* x = d.dimension(id);
+                      x->offset = x->offset < 0 ? -v : v;
+                      x->automatic = false;
+                  });
+    } else if (all([&](ObjectId id) { return doc.elevationPoint(id) != nullptr; })) {
+        heading(QString("%1 elevation points").arg(ids.size()));
+        lengthAll("Elevation", ids, [](const Document& d, ObjectId id) { return d.elevationPoint(id)->elevation; },
+                  [](Document& d, ObjectId id, double v) { d.elevationPoint(id)->elevation = v; }, -1e6);
+    } else if (all([&](ObjectId id) { return Document::findIn(doc.rooms, id) != nullptr; })) {
+        heading(QString("%1 rooms").arg(ids.size()));
+        QStringList types;
+        for (int t = 0; t <= static_cast<int>(RoomType::Other); ++t) types << toString(static_cast<RoomType>(t));
+        choiceAll("Type", types, ids, [](const Document& d, ObjectId id) { return static_cast<int>(Document::findIn(d.rooms, id)->type); },
+                  [](Document& d, ObjectId id, int v) { d.room(id)->type = static_cast<RoomType>(v); });
+        choiceAll("Floor", {"Level's floor framing", "Own joists", "Concrete slab"}, ids,
+                  [](const Document& d, ObjectId id) { return static_cast<int>(Document::findIn(d.rooms, id)->floor.kind); },
+                  [](Document& d, ObjectId id, int v) { d.room(id)->floor.kind = static_cast<FloorSystemKind>(v); });
+    } else {
+        heading(QString("%1 objects").arg(ids.size()));
+        // Count them by kind, in the order they were picked.
+        std::vector<std::pair<QString, int>> counts;
+        for (ObjectId id : ids) {
+            QString kind = ws_->describe(id);
+            if (Document::findIn(doc.rooms, id)) kind = "Room";
+            else kind.remove(QRegularExpression(" \\d+$"));
+            auto it = std::find_if(counts.begin(), counts.end(), [&](const auto& c) { return c.first == kind; });
+            if (it == counts.end()) counts.push_back({kind, 1});
+            else ++it->second;
+        }
+        for (const auto& [kind, n] : counts) info(kind, QString::number(n));
+        note("<span style='color:#666'>Pick a tool before Shift-dragging to select only that kind, like Windows "
+             "to select every window. Then their shared properties can be edited together here.</span>");
+    }
+    note("<span style='color:#666'>Drag any of them to move them all, or press Delete to delete them.</span>");
+}
+
 // Loads on a wall or beam split by where they come from; for a wall, also
 // its own weight and the total it passes to what is below.
 void PropertiesPanel::showLoadBreakdown(ObjectId id) {
@@ -291,21 +457,29 @@ void PropertiesPanel::showTerrain() {
 
 void PropertiesPanel::showDimension(const Dimension& dim) {
     const ObjectId id = dim.id;
+    const Document& doc = ws_->doc();
     heading(ws_->describe(id));
     info("Measures", feetInches(dim.length()));
     length("Offset from the points", std::abs(dim.offset), [id](Document& d, double v) {
         Dimension* x = d.dimension(id);
         x->offset = x->offset < 0 ? -v : v;
+        x->automatic = false;
     });
     check("Flip to the other side", dim.offset < 0, [id](Document& d, bool v) {
         Dimension* x = d.dimension(id);
         x->offset = v ? -std::abs(x->offset) : std::abs(x->offset);
+        x->automatic = false;
     });
+    choice("Walls measure to", {"Outside edge of framing", "Center of framing"},
+           doc.dimensionTo == DimensionTo::FramingEdge ? 0 : 1, [](Document& d, int v) {
+               setDimensionTo(d, v == 0 ? DimensionTo::FramingEdge : DimensionTo::FramingCenter);
+           });
+    note("<span style='color:#666'>Drag a square node to move that end to another point; it snaps to wall "
+         "framing corners, openings, posts and beam ends. Drag the diamond, or anywhere on the line, to move the "
+         "whole string in or out.</span>");
     if (dim.automatic)
-        note("<span style='color:#666'>Made by Dimension exterior walls. Running that again replaces it; "
-             "edit it and it is kept.</span>");
-    else
-        note("<span style='color:#666'>Drag the dimension line on the plan to move it in or out.</span>");
+        note("<span style='color:#666'>Made by Dimension exterior walls. Running that again replaces it unless "
+             "you have edited it.</span>");
 }
 
 void PropertiesPanel::showElevationPoint(const ElevationPoint& e) {

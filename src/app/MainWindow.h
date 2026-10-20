@@ -29,6 +29,7 @@ private:
     void refreshWallTypes();
     void useTool(PlanView::Tool tool);
     void autoDimensions();
+    void setDimensionTo(oa::DimensionTo to);
     void updateTitle();
     void updateUndoActions();
     bool maybeSave();
@@ -44,6 +45,8 @@ private:
     QTabWidget* tabs_;
     QComboBox* levelBox_;
     QMenu* wallMenu_ = nullptr;
+    QAction* dimEdge_ = nullptr;
+    QAction* dimCenter_ = nullptr;
     QAction* undoAction_ = nullptr;
     QAction* redoAction_ = nullptr;
 };

@@ -74,6 +74,7 @@ TEST_CASE("exterior dimensions string corners, openings and the overall length")
     door.offset = 120;
     d.openings.push_back(door);
 
+    d.dimensionTo = DimensionTo::FramingCenter; // walls set by hand: the middle of the framing is the centerline
     const auto dims = exteriorDimensions(d, l1);
     auto onSouth = [](const Dimension& x) { return x.a.y == 0 && x.b.y == 0; };
     std::vector<Dimension> south_;
@@ -90,6 +91,73 @@ TEST_CASE("exterior dimensions string corners, openings and the overall length")
     // East, north and west have no openings: just the overall.
     CHECK(dims.size() == 6);
     CHECK(std::all_of(dims.begin(), dims.end(), [](const Dimension& x) { return x.automatic; }));
+}
+
+TEST_CASE("exterior dimensions measure to the outside face of the framing") {
+    // Drawn clockwise, so the right of each wall faces into the house.
+    Document d = Document::createDefault();
+    const ObjectId l1 = d.levels[0].id;
+    const ObjectId south = addWall(d, l1, {480, 0}, {0, 0});
+    addWall(d, l1, {0, 0}, {0, 336});
+    addWall(d, l1, {0, 336}, {480, 336});
+    addWall(d, l1, {480, 336}, {480, 0});
+    Opening door;
+    door.id = d.newId();
+    door.wallId = south;
+    door.offset = 360; // 120 from the west corner
+    d.openings.push_back(door);
+
+    // Walls set by hand are all framing, 6" thick: the face is 3" out.
+    const auto dims = exteriorDimensions(d, l1);
+    std::vector<Dimension> south_;
+    for (const auto& x : dims)
+        if (std::abs(x.a.y + 3) < 1e-6 && std::abs(x.b.y + 3) < 1e-6) south_.push_back(x);
+    REQUIRE(south_.size() == 3);
+    CHECK(south_[0].length() == Approx(123));
+    CHECK(south_[1].length() == Approx(363));
+    CHECK(south_[2].length() == Approx(486));
+
+    // A 2x6 exterior wall type: the studs' outside face is under the sheathing and siding.
+    const WallType* t = d.firstWallType(WallKind::Exterior);
+    REQUIRE(t);
+    for (auto& w : d.walls) {
+        w.wallTypeId = t->id;
+        w.thickness = t->thickness();
+    }
+    const double face = t->thickness() / 2.0 - t->siding - t->sheathing;
+    const Segment line = wallMeasureLine(d, *d.wall(south), DimensionTo::FramingEdge);
+    CHECK(line.a.y == Approx(-face));
+    CHECK(std::min(line.a.x, line.b.x) == Approx(-face));
+    CHECK(std::max(line.a.x, line.b.x) == Approx(480 + face));
+    const Segment middle = wallMeasureLine(d, *d.wall(south), DimensionTo::FramingCenter);
+    CHECK(middle.a.y == Approx(-(face - t->studDepth / 2.0)));
+}
+
+TEST_CASE("switching to center of framing redoes automatic dimensions and keeps edited ones") {
+    Document d = Document::createDefault();
+    const ObjectId l1 = d.levels[0].id;
+    addWall(d, l1, {0, 0}, {480, 0});
+    addWall(d, l1, {480, 0}, {480, 336});
+    addWall(d, l1, {480, 336}, {0, 336});
+    addWall(d, l1, {0, 336}, {0, 0});
+    for (Dimension x : exteriorDimensions(d, l1)) {
+        x.id = d.newId();
+        d.dimensions.push_back(x);
+    }
+    Dimension mine;
+    mine.id = d.newId();
+    mine.levelId = l1;
+    mine.a = {0, 0};
+    mine.b = {100, 0};
+    d.dimensions.push_back(mine);
+
+    setDimensionTo(d, DimensionTo::FramingCenter);
+    CHECK(d.dimensionTo == DimensionTo::FramingCenter);
+    CHECK(d.dimension(mine.id) != nullptr);
+    double longest = 0;
+    for (const auto& x : d.dimensions)
+        if (x.automatic) longest = std::max(longest, x.length());
+    CHECK(longest == Approx(480)); // centerline to centerline, no longer 486
 }
 
 TEST_CASE("a room with its own floor system changes what the walls below carry") {
