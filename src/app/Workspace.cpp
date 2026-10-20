@@ -9,6 +9,7 @@ Workspace::Workspace(QObject* parent) : QObject(parent) { newDocument(); }
 void Workspace::edit(const QString& text, const std::function<void(oa::Document&)>& change) {
     oa::Document before = doc_;
     change(doc_);
+    doc_.refresh();
     const bool wasModified = isModified();
     undo_.push(text.toStdString(), std::move(before), doc_);
     loads_.reset();
@@ -36,6 +37,7 @@ void Workspace::replaceDocument(const oa::Document& doc) {
 
 void Workspace::newDocument(oa::Document doc) {
     doc_ = std::move(doc);
+    doc_.refresh();
     undo_.clear();
     filePath_.clear();
     loads_.reset();
@@ -88,10 +90,12 @@ void Workspace::select(oa::ObjectId id) {
 
 QString Workspace::describe(oa::ObjectId id) const {
     const auto& d = doc_;
-    if (d.wall(id)) return QString("Wall %1").arg(id);
+    if (const oa::Wall* w = d.wall(id)) return QString(w->roomDivider ? "Room divider %1" : "Wall %1").arg(id);
     if (const oa::Opening* o = d.opening(id))
         return QString("%1 %2").arg(o->kind == oa::OpeningKind::Door ? "Door" : "Window").arg(id);
     if (d.beam(id)) return QString("Beam %1").arg(id);
+    if (d.post(id)) return QString("Post %1").arg(id);
+    if (const oa::WallType* t = d.wallType(id)) return QString::fromStdString(t->name);
     if (d.roof(id)) return QString("Roof %1").arg(id);
     if (d.roofPlane(id)) return QString("Roof plane %1").arg(id);
     if (oa::Document::findIn(d.platforms, id)) return QString("Floor framing %1").arg(id);

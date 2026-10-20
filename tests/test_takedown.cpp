@@ -210,9 +210,8 @@ TEST_CASE("a single roof plane splits between its eave and high side") {
     p.levelId = l1;
     p.a = {0, 0};
     p.b = {240, 0};
-    p.run = 144;
     p.pitch = 3;
-    p.overhang = 12;
+    p.outline = RoofPlane::rectangle(p.a, p.b, 144, 12);
     doc.roofPlanes.push_back(p);
 
     const auto result = runTakedown(doc);

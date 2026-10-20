@@ -15,7 +15,7 @@ class Workspace;
 class PlanView : public QWidget {
     Q_OBJECT
 public:
-    enum class Tool { Select, Wall, Door, Window, Beam, Floor, Roof, Room, RoofPlane };
+    enum class Tool { Select, Wall, Door, Window, Beam, Floor, Roof, RoomDivider, RoofPlane, JoinPlanes, Post };
 
     explicit PlanView(Workspace* ws, QWidget* parent = nullptr);
 
@@ -23,6 +23,9 @@ public:
     void setTool(Tool tool);
     void setShowLoads(bool show);
     bool showLoads() const { return showLoads_; }
+    // The wall type new walls get.
+    void setWallType(oa::ObjectId id) { wallTypeId_ = id; }
+    oa::ObjectId wallType() const { return wallTypeId_; }
 
 public slots:
     void zoomToFit();
@@ -59,7 +62,13 @@ private:
     void selectFromStack(const std::vector<oa::ObjectId>& hits, oa::ObjectId id);
     void cycleStack();
     void showStackMenu(QPointF screenPos, const std::vector<oa::ObjectId>& hits);
-    const oa::Wall* wallNear(oa::Vec2 p, double pixelTolerance) const;
+    const oa::Wall* wallNear(oa::Vec2 p, double pixelTolerance, bool skipDividers = false) const;
+    // The roof plane edge nearest `p` on this level, within the pick distance.
+    std::optional<std::pair<oa::ObjectId, int>> roofEdgeNear(oa::Vec2 p) const;
+    // A handle of the selected roof plane under a screen point: a corner, or
+    // the middle of an edge.
+    std::optional<int> roofVertexAt(QPointF pos) const;
+    std::optional<int> roofEdgeHandleAt(QPointF pos) const;
 
     void drawGrid(QPainter& g) const;
     void drawLevelBelow(QPainter& g) const;
@@ -70,6 +79,7 @@ private:
     void drawBeams(QPainter& g) const;
     void drawRoofs(QPainter& g) const;
     void drawRoofPlanes(QPainter& g) const;
+    void drawPosts(QPainter& g) const;
     void drawLoads(QPainter& g) const;
     void drawToolPreview(QPainter& g) const;
     void drawLengthLabel(QPainter& g, oa::Vec2 a, oa::Vec2 b) const;
@@ -77,10 +87,16 @@ private:
     void finishRect(oa::Vec2 a, oa::Vec2 b);
     void placeOpening(oa::Vec2 p, oa::OpeningKind kind);
     void finishRoofPlane(oa::Vec2 a, oa::Vec2 b, oa::Vec2 high);
+    void addWall(oa::Vec2 a, oa::Vec2 b);
+    void placePost(oa::Vec2 p);
+    void joinClick(oa::Vec2 p);
 
     Workspace* ws_;
     Tool tool_ = Tool::Select;
     bool showLoads_ = false;
+    oa::ObjectId wallTypeId_ = oa::kNoId;
+    // First pick of the join tool: a roof plane and one of its edges.
+    std::optional<std::pair<oa::ObjectId, int>> joinEdge_;
 
     double scale_ = 1.0;     // pixels per inch
     QPointF offset_{40, 40}; // screen position of the world origin
@@ -94,8 +110,9 @@ private:
 
     // Dragging in the select tool edits a preview copy; releasing the
     // mouse commits it as one undoable step.
-    enum class Drag { None, Move, EndA, EndB };
+    enum class Drag { None, Move, EndA, EndB, Vertex, Edge };
     Drag drag_ = Drag::None;
+    int dragIndex_ = -1; // the roof plane corner or edge being dragged
     oa::Vec2 dragStart_;
     std::optional<oa::Document> preview_;
 

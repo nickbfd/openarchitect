@@ -10,8 +10,8 @@
           480.0,
           168.0
         ],
-        "id": 16,
-        "levelId": 1,
+        "id": 22,
+        "levelId": 6,
         "memberId": ""
       },
       {
@@ -23,136 +23,148 @@
           192.0,
           -72.0
         ],
-        "id": 21,
-        "levelId": 1,
-        "memberId": ""
+        "id": 27,
+        "levelId": 6,
+        "memberId": "dfl-no2-1-4x10"
       }
     ],
     "levels": [
       {
         "elevation": 0.0,
         "floorThickness": 12.875,
-        "id": 1,
+        "id": 6,
         "name": "Floor 1",
         "wallHeight": 97.125
       },
       {
         "elevation": 110.0,
         "floorThickness": 12.875,
-        "id": 2,
+        "id": 7,
         "name": "Floor 2",
         "wallHeight": 97.125
       }
     ],
     "name": "Sample house",
-    "nextId": 38,
+    "nextId": 49,
     "openings": [
       {
+        "headerMemberId": "",
         "height": 80.0,
-        "id": 9,
+        "id": 15,
         "kind": "door",
         "offset": 96.0,
         "sillHeight": 0.0,
-        "wallId": 3,
+        "wallId": 8,
         "width": 36.0
       },
       {
+        "headerMemberId": "",
         "height": 48.0,
-        "id": 10,
+        "id": 16,
         "kind": "window",
         "offset": 240.0,
         "sillHeight": 36.0,
-        "wallId": 3,
+        "wallId": 8,
         "width": 72.0
       },
       {
+        "headerMemberId": "",
         "height": 48.0,
-        "id": 11,
+        "id": 17,
         "kind": "window",
         "offset": 384.0,
         "sillHeight": 36.0,
-        "wallId": 3,
+        "wallId": 8,
         "width": 36.0
       },
       {
+        "headerMemberId": "",
         "height": 48.0,
-        "id": 12,
+        "id": 18,
         "kind": "window",
         "offset": 84.0,
         "sillHeight": 36.0,
-        "wallId": 4,
+        "wallId": 9,
         "width": 36.0
       },
       {
+        "headerMemberId": "",
         "height": 48.0,
-        "id": 13,
+        "id": 19,
         "kind": "window",
         "offset": 144.0,
         "sillHeight": 36.0,
-        "wallId": 5,
+        "wallId": 10,
         "width": 48.0
       },
       {
+        "headerMemberId": "",
         "height": 80.0,
-        "id": 14,
+        "id": 20,
         "kind": "door",
         "offset": 360.0,
         "sillHeight": 0.0,
-        "wallId": 5,
+        "wallId": 10,
         "width": 72.0
       },
       {
+        "headerMemberId": "",
         "height": 48.0,
-        "id": 15,
+        "id": 21,
         "kind": "window",
         "offset": 84.0,
         "sillHeight": 36.0,
-        "wallId": 6,
+        "wallId": 11,
         "width": 36.0
       },
       {
+        "headerMemberId": "",
         "height": 48.0,
-        "id": 29,
+        "id": 40,
         "kind": "window",
         "offset": 96.0,
         "sillHeight": 36.0,
-        "wallId": 24,
+        "wallId": 35,
         "width": 48.0
       },
       {
+        "headerMemberId": "",
         "height": 48.0,
-        "id": 30,
+        "id": 41,
         "kind": "window",
         "offset": 384.0,
         "sillHeight": 36.0,
-        "wallId": 24,
+        "wallId": 35,
         "width": 48.0
       },
       {
+        "headerMemberId": "",
         "height": 48.0,
-        "id": 31,
+        "id": 42,
         "kind": "window",
         "offset": 168.0,
         "sillHeight": 36.0,
-        "wallId": 25,
+        "wallId": 36,
         "width": 36.0
       },
       {
+        "headerMemberId": "",
         "height": 48.0,
-        "id": 32,
+        "id": 43,
         "kind": "window",
         "offset": 120.0,
         "sillHeight": 36.0,
-        "wallId": 26,
+        "wallId": 37,
         "width": 36.0
       },
       {
+        "headerMemberId": "",
         "height": 48.0,
-        "id": 33,
+        "id": 44,
         "kind": "window",
         "offset": 360.0,
         "sillHeight": 36.0,
-        "wallId": 26,
+        "wallId": 37,
         "width": 36.0
       }
     ],
@@ -169,10 +181,32 @@
           ]
         },
         "deadPsf": 10.0,
-        "id": 36,
+        "id": 47,
         "joistAxis": "y",
-        "levelId": 2,
+        "levelId": 7,
         "livePsf": 40.0
+      }
+    ],
+    "posts": [
+      {
+        "height": 0.0,
+        "id": 28,
+        "levelId": 6,
+        "memberId": "dfl-no2-4x4",
+        "position": [
+          0.0,
+          -72.0
+        ]
+      },
+      {
+        "height": 0.0,
+        "id": 29,
+        "levelId": 6,
+        "memberId": "dfl-no2-4x4",
+        "position": [
+          192.0,
+          -72.0
+        ]
       }
     ],
     "roofPlanes": [
@@ -191,11 +225,30 @@
         "deadPsf": 15.0,
         "framing": "rafters",
         "hasCeiling": false,
-        "id": 22,
-        "levelId": 1,
-        "overhang": 12.0,
+        "highBearing": true,
+        "id": 30,
+        "levelId": 6,
+        "outline": [
+          [
+            -12.0,
+            -84.0
+          ],
+          [
+            204.0,
+            -84.0
+          ],
+          [
+            204.0,
+            0.0
+          ],
+          [
+            -12.0,
+            0.0
+          ]
+        ],
+        "overhang": 18.0,
         "pitch": 3.0,
-        "run": 72.0,
+        "run": 0.0,
         "snowPsf": 0.0
       }
     ],
@@ -217,8 +270,8 @@
         },
         "framing": "rafters",
         "hasCeiling": true,
-        "id": 37,
-        "levelId": 2,
+        "id": 48,
+        "levelId": 7,
         "overhang": 18.0,
         "pitch": 6.0,
         "ridgeAxis": "x",
@@ -229,169 +282,169 @@
     ],
     "rooms": [
       {
-        "id": 17,
-        "levelId": 1,
-        "name": "Living",
-        "outline": [
-          [
-            288.0,
-            0.0
-          ],
-          [
-            480.0,
-            0.0
-          ],
-          [
-            480.0,
-            336.0
-          ],
-          [
-            288.0,
-            336.0
-          ]
-        ],
-        "type": "living"
-      },
-      {
-        "id": 18,
-        "levelId": 1,
+        "id": 24,
+        "levelId": 6,
         "name": "Kitchen",
         "outline": [
           [
-            0.0,
-            0.0
+            3.59375,
+            3.59375
           ],
           [
             288.0,
-            0.0
+            3.59375
           ],
           [
             288.0,
-            168.0
+            165.75
           ],
           [
-            0.0,
-            168.0
+            3.59375,
+            165.75
           ]
         ],
         "type": "kitchen"
       },
       {
-        "id": 19,
-        "levelId": 1,
-        "name": "Office",
-        "outline": [
-          [
-            0.0,
-            168.0
-          ],
-          [
-            192.0,
-            168.0
-          ],
-          [
-            192.0,
-            336.0
-          ],
-          [
-            0.0,
-            336.0
-          ]
-        ],
-        "type": "bedroom"
-      },
-      {
-        "id": 20,
-        "levelId": 1,
-        "name": "Dining",
-        "outline": [
-          [
-            192.0,
-            168.0
-          ],
-          [
-            288.0,
-            168.0
-          ],
-          [
-            288.0,
-            336.0
-          ],
-          [
-            192.0,
-            336.0
-          ]
-        ],
-        "type": "living"
-      },
-      {
-        "id": 23,
-        "levelId": 1,
+        "id": 34,
+        "levelId": 6,
         "name": "Porch",
         "outline": [
           [
+            192.0,
+            -3.59375
+          ],
+          [
+            0.0,
+            -3.59375
+          ],
+          [
             0.0,
             -72.0
           ],
           [
             192.0,
             -72.0
-          ],
-          [
-            192.0,
-            0.0
-          ],
-          [
-            0.0,
-            0.0
           ]
         ],
         "type": "deck"
       },
       {
-        "id": 34,
-        "levelId": 2,
-        "name": "Bedroom 1",
+        "id": 23,
+        "levelId": 6,
+        "name": "Living",
         "outline": [
           [
-            0.0,
-            0.0
+            288.0,
+            3.59375
           ],
           [
-            240.0,
-            0.0
+            476.40625,
+            3.59375
           ],
           [
-            240.0,
-            336.0
+            476.40625,
+            332.40625
           ],
           [
-            0.0,
-            336.0
+            288.0,
+            332.40625
+          ]
+        ],
+        "type": "living"
+      },
+      {
+        "id": 26,
+        "levelId": 6,
+        "name": "Dining",
+        "outline": [
+          [
+            288.0,
+            332.40625
+          ],
+          [
+            194.25,
+            332.40625
+          ],
+          [
+            194.25,
+            170.25
+          ],
+          [
+            288.0,
+            170.25
+          ]
+        ],
+        "type": "living"
+      },
+      {
+        "id": 25,
+        "levelId": 6,
+        "name": "Office",
+        "outline": [
+          [
+            189.75,
+            332.40625
+          ],
+          [
+            3.59375,
+            332.40625
+          ],
+          [
+            3.59375,
+            170.25
+          ],
+          [
+            189.75,
+            170.25
           ]
         ],
         "type": "bedroom"
       },
       {
-        "id": 35,
-        "levelId": 2,
+        "id": 45,
+        "levelId": 7,
+        "name": "Bedroom 1",
+        "outline": [
+          [
+            3.59375,
+            3.59375
+          ],
+          [
+            237.75,
+            3.59375
+          ],
+          [
+            237.75,
+            332.40625
+          ],
+          [
+            3.59375,
+            332.40625
+          ]
+        ],
+        "type": "bedroom"
+      },
+      {
+        "id": 46,
+        "levelId": 7,
         "name": "Bedroom 2",
         "outline": [
           [
-            240.0,
-            0.0
+            242.25,
+            3.59375
           ],
           [
-            480.0,
-            0.0
+            476.40625,
+            3.59375
           ],
           [
-            480.0,
-            336.0
+            476.40625,
+            332.40625
           ],
           [
-            240.0,
-            336.0
+            242.25,
+            332.40625
           ]
         ],
         "type": "bedroom"
@@ -403,6 +456,68 @@
       "importanceIs": 1.0,
       "thermalCt": 1.1
     },
+    "wallTypes": [
+      {
+        "id": 1,
+        "insulated": true,
+        "insulation": "R-21 batts",
+        "interiorFinish": 0.5,
+        "kind": "exterior",
+        "name": "6\" exterior wall (2x6)",
+        "sheathing": 0.4375,
+        "siding": 0.75,
+        "studDepth": 5.5,
+        "studSpacing": 16.0
+      },
+      {
+        "id": 2,
+        "insulated": true,
+        "insulation": "R-13 batts",
+        "interiorFinish": 0.5,
+        "kind": "exterior",
+        "name": "4\" exterior wall (2x4)",
+        "sheathing": 0.4375,
+        "siding": 0.75,
+        "studDepth": 3.5,
+        "studSpacing": 16.0
+      },
+      {
+        "id": 3,
+        "insulated": false,
+        "insulation": "",
+        "interiorFinish": 0.5,
+        "kind": "interior",
+        "name": "4\" interior wall (2x4)",
+        "sheathing": 0.0,
+        "siding": 0.0,
+        "studDepth": 3.5,
+        "studSpacing": 16.0
+      },
+      {
+        "id": 4,
+        "insulated": false,
+        "insulation": "",
+        "interiorFinish": 0.5,
+        "kind": "interior",
+        "name": "6\" interior wall (2x6)",
+        "sheathing": 0.0,
+        "siding": 0.0,
+        "studDepth": 5.5,
+        "studSpacing": 16.0
+      },
+      {
+        "id": 5,
+        "insulated": false,
+        "insulation": "",
+        "interiorFinish": 0.5,
+        "kind": "roomDivider",
+        "name": "Room divider (invisible)",
+        "sheathing": 0.0,
+        "siding": 0.0,
+        "studDepth": 0.0,
+        "studSpacing": 16.0
+      }
+    ],
     "walls": [
       {
         "a": [
@@ -415,10 +530,12 @@
         ],
         "bearing": true,
         "height": 0.0,
-        "id": 3,
-        "levelId": 1,
-        "selfWeightPsf": 10.0,
-        "thickness": 5.5
+        "id": 8,
+        "levelId": 6,
+        "roomDivider": false,
+        "selfWeightPsf": 8.5514453125,
+        "thickness": 7.1875,
+        "wallTypeId": 1
       },
       {
         "a": [
@@ -431,10 +548,12 @@
         ],
         "bearing": true,
         "height": 0.0,
-        "id": 4,
-        "levelId": 1,
-        "selfWeightPsf": 10.0,
-        "thickness": 5.5
+        "id": 9,
+        "levelId": 6,
+        "roomDivider": false,
+        "selfWeightPsf": 8.5514453125,
+        "thickness": 7.1875,
+        "wallTypeId": 1
       },
       {
         "a": [
@@ -447,10 +566,12 @@
         ],
         "bearing": true,
         "height": 0.0,
-        "id": 5,
-        "levelId": 1,
-        "selfWeightPsf": 10.0,
-        "thickness": 5.5
+        "id": 10,
+        "levelId": 6,
+        "roomDivider": false,
+        "selfWeightPsf": 8.5514453125,
+        "thickness": 7.1875,
+        "wallTypeId": 1
       },
       {
         "a": [
@@ -463,10 +584,12 @@
         ],
         "bearing": true,
         "height": 0.0,
-        "id": 6,
-        "levelId": 1,
-        "selfWeightPsf": 10.0,
-        "thickness": 5.5
+        "id": 11,
+        "levelId": 6,
+        "roomDivider": false,
+        "selfWeightPsf": 8.5514453125,
+        "thickness": 7.1875,
+        "wallTypeId": 1
       },
       {
         "a": [
@@ -479,10 +602,12 @@
         ],
         "bearing": true,
         "height": 0.0,
-        "id": 7,
-        "levelId": 1,
-        "selfWeightPsf": 10.0,
-        "thickness": 4.5
+        "id": 12,
+        "levelId": 6,
+        "roomDivider": false,
+        "selfWeightPsf": 5.9791015625,
+        "thickness": 4.5,
+        "wallTypeId": 3
       },
       {
         "a": [
@@ -495,10 +620,84 @@
         ],
         "bearing": false,
         "height": 0.0,
-        "id": 8,
-        "levelId": 1,
-        "selfWeightPsf": 8.0,
-        "thickness": 4.5
+        "id": 13,
+        "levelId": 6,
+        "roomDivider": false,
+        "selfWeightPsf": 5.9791015625,
+        "thickness": 4.5,
+        "wallTypeId": 3
+      },
+      {
+        "a": [
+          288.0,
+          0.0
+        ],
+        "b": [
+          288.0,
+          336.0
+        ],
+        "bearing": false,
+        "height": 0.0,
+        "id": 14,
+        "levelId": 6,
+        "roomDivider": true,
+        "selfWeightPsf": 0.0,
+        "thickness": 0.0,
+        "wallTypeId": 5
+      },
+      {
+        "a": [
+          0.0,
+          0.0
+        ],
+        "b": [
+          0.0,
+          -72.0
+        ],
+        "bearing": false,
+        "height": 0.0,
+        "id": 31,
+        "levelId": 6,
+        "roomDivider": true,
+        "selfWeightPsf": 0.0,
+        "thickness": 0.0,
+        "wallTypeId": 5
+      },
+      {
+        "a": [
+          0.0,
+          -72.0
+        ],
+        "b": [
+          192.0,
+          -72.0
+        ],
+        "bearing": false,
+        "height": 0.0,
+        "id": 32,
+        "levelId": 6,
+        "roomDivider": true,
+        "selfWeightPsf": 0.0,
+        "thickness": 0.0,
+        "wallTypeId": 5
+      },
+      {
+        "a": [
+          192.0,
+          -72.0
+        ],
+        "b": [
+          192.0,
+          0.0
+        ],
+        "bearing": false,
+        "height": 0.0,
+        "id": 33,
+        "levelId": 6,
+        "roomDivider": true,
+        "selfWeightPsf": 0.0,
+        "thickness": 0.0,
+        "wallTypeId": 5
       },
       {
         "a": [
@@ -511,10 +710,12 @@
         ],
         "bearing": true,
         "height": 0.0,
-        "id": 24,
-        "levelId": 2,
-        "selfWeightPsf": 10.0,
-        "thickness": 5.5
+        "id": 35,
+        "levelId": 7,
+        "roomDivider": false,
+        "selfWeightPsf": 8.5514453125,
+        "thickness": 7.1875,
+        "wallTypeId": 1
       },
       {
         "a": [
@@ -527,10 +728,12 @@
         ],
         "bearing": true,
         "height": 0.0,
-        "id": 25,
-        "levelId": 2,
-        "selfWeightPsf": 10.0,
-        "thickness": 5.5
+        "id": 36,
+        "levelId": 7,
+        "roomDivider": false,
+        "selfWeightPsf": 8.5514453125,
+        "thickness": 7.1875,
+        "wallTypeId": 1
       },
       {
         "a": [
@@ -543,10 +746,12 @@
         ],
         "bearing": true,
         "height": 0.0,
-        "id": 26,
-        "levelId": 2,
-        "selfWeightPsf": 10.0,
-        "thickness": 5.5
+        "id": 37,
+        "levelId": 7,
+        "roomDivider": false,
+        "selfWeightPsf": 8.5514453125,
+        "thickness": 7.1875,
+        "wallTypeId": 1
       },
       {
         "a": [
@@ -559,10 +764,12 @@
         ],
         "bearing": true,
         "height": 0.0,
-        "id": 27,
-        "levelId": 2,
-        "selfWeightPsf": 10.0,
-        "thickness": 5.5
+        "id": 38,
+        "levelId": 7,
+        "roomDivider": false,
+        "selfWeightPsf": 8.5514453125,
+        "thickness": 7.1875,
+        "wallTypeId": 1
       },
       {
         "a": [
@@ -575,10 +782,12 @@
         ],
         "bearing": false,
         "height": 0.0,
-        "id": 28,
-        "levelId": 2,
-        "selfWeightPsf": 8.0,
-        "thickness": 4.5
+        "id": 39,
+        "levelId": 7,
+        "roomDivider": false,
+        "selfWeightPsf": 5.9791015625,
+        "thickness": 4.5,
+        "wallTypeId": 3
       }
     ]
   },

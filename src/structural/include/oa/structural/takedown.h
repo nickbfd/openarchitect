@@ -33,10 +33,20 @@ struct SupportLoads {
     bool carriesRoofOnly() const;
 };
 
+// What a post carries: the beam ends that land on it, unfactored.
+struct PostLoads {
+    ObjectId postId = kNoId;
+    ObjectId levelId = kNoId;
+    CaseLoads load;
+    std::vector<std::string> sources;
+};
+
 struct TakedownResult {
     std::vector<SupportLoads> supports;
+    std::vector<PostLoads> posts;
     std::vector<std::string> warnings;
 
+    const PostLoads* post(ObjectId id) const;
     const SupportLoads* find(SupportKind kind, ObjectId objectId) const;
     const SupportLoads* wall(ObjectId id) const { return find(SupportKind::Wall, id); }
     const SupportLoads* beam(ObjectId id) const { return find(SupportKind::Beam, id); }
@@ -53,7 +63,8 @@ struct TakedownResult {
 //  - ceilings and floors: one-way framing, each support taking half the
 //    distance to its neighbors (or the cantilever to the edge);
 //  - walls add their self weight and pass everything to the wall or beam
-//    directly beneath; beams pass their end reactions as point loads.
+//    directly beneath; beams pass their end reactions as point loads to the
+//    wall, post or beam under each end, and posts pass theirs straight down.
 // Anything with no support beneath produces a warning naming it.
 TakedownResult runTakedown(const Document& doc);
 

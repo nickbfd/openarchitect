@@ -1,11 +1,85 @@
 #include "oa/core/document.h"
 
+#include "oa/core/rooms.h"
 #include "oa/core/units.h"
 
 namespace oa {
 
+double WallType::thickness() const {
+    switch (kind) {
+    case WallKind::Exterior: return interiorFinish + studDepth + sheathing + siding;
+    case WallKind::Interior: return interiorFinish * 2.0 + studDepth;
+    case WallKind::RoomDivider: return 0.0;
+    }
+    return studDepth;
+}
+
+double WallType::selfWeightPsf() const {
+    if (kind == WallKind::RoomDivider) return 0.0;
+    // Studs at 35 pcf, plus about 15% for kings, jacks and blocking, plus
+    // three plates spread over an 8 ft wall.
+    const double studPlf = 1.5 * studDepth / 144.0 * 35.0;
+    double psf = studPlf * (12.0 / studSpacing * 1.15 + 3.0 / 8.0);
+    psf += 4.4 * interiorFinish * (kind == WallKind::Interior ? 2.0 : 1.0); // gypsum, 4.4 psf per inch
+    if (kind == WallKind::Exterior) {
+        psf += 3.2 * sheathing; // OSB or plywood
+        psf += 3.0 * siding;    // a middle value for wood, vinyl and fiber cement
+    }
+    if (insulated) psf += 0.04 * studDepth; // glass fiber batts
+    return psf;
+}
+
+std::vector<WallType> defaultWallTypes() {
+    auto make = [](const char* name, WallKind kind, double stud, bool insulated, const char* insulation) {
+        WallType t;
+        t.name = name;
+        t.kind = kind;
+        t.studDepth = stud;
+        t.insulated = insulated;
+        t.insulation = insulation;
+        if (kind != WallKind::Exterior) t.sheathing = t.siding = 0.0;
+        return t;
+    };
+    return {
+        make("6\" exterior wall (2x6)", WallKind::Exterior, 5.5, true, "R-21 batts"),
+        make("4\" exterior wall (2x4)", WallKind::Exterior, 3.5, true, "R-13 batts"),
+        make("4\" interior wall (2x4)", WallKind::Interior, 3.5, false, ""),
+        make("6\" interior wall (2x6)", WallKind::Interior, 5.5, false, ""),
+        make("Room divider (invisible)", WallKind::RoomDivider, 0.0, false, ""),
+    };
+}
+
+double RoofPlane::width() const {
+    if (outline.empty()) return 0.0;
+    double lo = 1e30, hi = -1e30;
+    for (Vec2 p : outline) {
+        lo = std::min(lo, alongFrom(p));
+        hi = std::max(hi, alongFrom(p));
+    }
+    return hi - lo;
+}
+
+double RoofPlane::runLength() const {
+    double hi = 0.0;
+    for (Vec2 p : outline) hi = std::max(hi, upFrom(p));
+    return hi;
+}
+
+double RoofPlane::eaveOverhang() const {
+    double lo = 0.0;
+    for (Vec2 p : outline) lo = std::min(lo, upFrom(p));
+    return -lo;
+}
+
+Polygon RoofPlane::rectangle(Vec2 a, Vec2 b, double run, double overhang) {
+    const Vec2 up = (b - a).normalized().perp();
+    return {a - up * overhang, b - up * overhang, b + up * run, a + up * run};
+}
+
 Document Document::createDefault() {
     Document d;
+    d.wallTypes = defaultWallTypes();
+    for (auto& t : d.wallTypes) t.id = d.newId();
     Level l1;
     l1.id = d.newId();
     l1.name = "Floor 1";
@@ -56,6 +130,18 @@ const RoofSettings* Document::roofSettings(ObjectId id) const {
     return roofPlane(id);
 }
 
+const WallType* Document::firstWallType(WallKind kind) const {
+    for (const auto& t : wallTypes)
+        if (t.kind == kind) return &t;
+    return nullptr;
+}
+
+double Document::postHeight(const Post& p) const {
+    if (p.height > 0.0) return p.height;
+    const Level* l = level(p.levelId);
+    return l ? l->wallHeight : 97.125;
+}
+
 ObjectId Document::levelOf(ObjectId id) const {
     if (const Wall* w = wall(id)) return w->levelId;
     if (const Opening* o = opening(id)) {
@@ -65,6 +151,7 @@ ObjectId Document::levelOf(ObjectId id) const {
     if (const Beam* b = beam(id)) return b->levelId;
     if (const Roof* r = roof(id)) return r->levelId;
     if (const RoofPlane* p = roofPlane(id)) return p->levelId;
+    if (const Post* p = post(id)) return p->levelId;
     if (const FloorPlatform* f = findIn(platforms, id)) return f->levelId;
     if (const Room* r = findIn(rooms, id)) return r->levelId;
     if (level(id)) return id;
@@ -89,6 +176,13 @@ bool Document::remove(ObjectId id) {
         return v.size() != n;
     };
 
+    // Walls of a removed type keep their current sizes.
+    auto eraseWallType = [&](ObjectId typeId) {
+        if (!eraseId(wallTypes)) return false;
+        for (auto& w : walls)
+            if (w.wallTypeId == typeId) w.wallTypeId = kNoId;
+        return true;
+    };
     if (eraseId(walls)) {
         std::erase_if(openings, [id](const Opening& o) { return o.wallId == id; });
         return true;
@@ -104,10 +198,69 @@ bool Document::remove(ObjectId id) {
         std::erase_if(roofs, onLevel);
         std::erase_if(roofPlanes, onLevel);
         std::erase_if(beams, onLevel);
+        std::erase_if(posts, onLevel);
         return true;
     }
     return eraseId(openings) || eraseId(rooms) || eraseId(platforms) || eraseId(roofs) ||
-           eraseId(roofPlanes) || eraseId(beams);
+           eraseId(roofPlanes) || eraseId(beams) || eraseId(posts) || eraseWallType(id);
+}
+
+void Document::refresh() {
+    upgrade();
+    updateRooms(*this);
+}
+
+void Document::upgrade() {
+    if (wallTypes.empty()) {
+        wallTypes = defaultWallTypes();
+        for (auto& t : wallTypes) t.id = newId();
+    }
+    for (auto& w : walls) {
+        const WallType* t = wallType(w.wallTypeId);
+        if (!t) {
+            w.wallTypeId = kNoId;
+            continue;
+        }
+        w.thickness = t->thickness();
+        w.selfWeightPsf = t->selfWeightPsf();
+        w.roomDivider = t->isDivider();
+        if (w.roomDivider) w.bearing = false;
+    }
+    // Dividers carry nothing and have no openings.
+    std::erase_if(openings, [this](const Opening& o) {
+        const Wall* w = wall(o.wallId);
+        return w && w->roomDivider;
+    });
+    for (auto& p : roofPlanes) {
+        if (p.outline.size() < 3) p.outline = RoofPlane::rectangle(p.a, p.b, p.run > 0.0 ? p.run : 120.0, p.overhang);
+        p.run = 0.0;
+    }
+}
+
+double plateHeight(const Document& doc, ObjectId levelId) {
+    const Level* l = doc.level(levelId);
+    return l ? l->elevation + l->wallHeight : 97.125;
+}
+
+double roofPlaneHeight(const Document& doc, const RoofPlane& plane, Vec2 p) {
+    return plateHeight(doc, plane.levelId) + plane.riseAt(p);
+}
+
+Polygon joinRoofPlanes(const Document& doc, const RoofPlane& plane, int edge, const RoofPlane& other) {
+    // Each surface is z = g . p + c; they meet where (g1 - g2) . p = c2 - c1.
+    auto coefficients = [&](const RoofPlane& r, Vec2& g, double& c) {
+        const double slope = r.pitch / 12.0;
+        g = r.upslope() * slope;
+        c = plateHeight(doc, r.levelId) - dot(r.a, g);
+    };
+    Vec2 g1, g2;
+    double c1, c2;
+    coefficients(plane, g1, c1);
+    coefficients(other, g2, c2);
+    const Vec2 n = g1 - g2;
+    if (n.lengthSq() < 1e-9) return {};
+    const Vec2 onLine = n * ((c2 - c1) / n.lengthSq());
+    return replaceEdge(plane.outline, edge, onLine, n.perp());
 }
 
 const char* toString(RoomType t) {

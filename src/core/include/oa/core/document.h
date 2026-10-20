@@ -31,14 +31,43 @@ struct Level {
     double floorThickness = 12.875;// inches, joist depth + subfloor of the level above
 };
 
+enum class WallKind { Exterior, Interior, RoomDivider };
+
+// A named wall build-up, like "2x6 exterior": stud size and spacing, the
+// layers on each face, and insulation. Walls of a type take their thickness
+// and weight from it, and the framing view builds their studs from it.
+struct WallType {
+    ObjectId id = kNoId;
+    std::string name;
+    WallKind kind = WallKind::Exterior;
+    double studDepth = 5.5;        // actual, inches (3.5 for 2x4, 5.5 for 2x6)
+    double studSpacing = 16.0;     // on center, inches
+    double interiorFinish = 0.5;   // gypsum board on the room side, inches
+    double sheathing = 0.4375;     // structural panel, exterior walls only
+    double siding = 0.75;          // exterior finish, exterior walls only
+    bool insulated = true;
+    std::string insulation = "R-21 batts";
+
+    // Finished thickness. Interior walls have finish on both faces.
+    double thickness() const;
+    // Dead load per square foot of wall face: studs and plates, layers, insulation.
+    double selfWeightPsf() const;
+    bool isDivider() const { return kind == WallKind::RoomDivider; }
+};
+
+// Wall types a new plan starts with.
+std::vector<WallType> defaultWallTypes();
+
 struct Wall {
     ObjectId id = kNoId;
     ObjectId levelId = kNoId;
     Vec2 a, b;                 // centerline end points, inches
-    double thickness = 5.5;    // inches
+    ObjectId wallTypeId = kNoId; // kNoId: thickness and weight are set by hand
+    double thickness = 5.5;    // inches; follows the wall type when it has one
     double height = 0.0;       // inches; 0 means the level's wall height
     bool bearing = true;
-    double selfWeightPsf = 10.0; // dead load per square foot of wall face
+    double selfWeightPsf = 10.0; // dead load per square foot of wall face; follows the wall type
+    bool roomDivider = false;  // an invisible wall that only separates rooms; follows the wall type
 
     Segment centerline() const { return {a, b}; }
     double length() const { return distance(a, b); }
@@ -52,6 +81,9 @@ struct Opening {
     double width = 36.0;     // rough opening, inches
     double height = 48.0;    // inches
     double sillHeight = 36.0;// inches above the level's floor (0 for doors)
+    std::string headerMemberId; // catalog member chosen for the header, empty until one is picked
+
+    double topHeight() const { return sillHeight + height; }
 };
 
 struct Room {
@@ -111,30 +143,52 @@ struct Roof : RoofSettings {
 };
 
 // One flat sloped roof plane, drawn on its own: a shed roof, a porch roof,
-// or one face of a roof built plane by plane. It bears along its low (eave)
-// line from `a` to `b` and rises to the left of that line for `run` inches,
-// where it bears on its high line. The overhang extends past the eave.
+// or one face of a roof built plane by plane. Its baseline from `a` to `b`
+// is where it bears on its eave wall or beam, at the plate; the plane rises
+// to the left of that line. `outline` is the edge of the roof surface in
+// plan, overhangs included, so every side can be moved on its own.
 struct RoofPlane : RoofSettings {
     ObjectId id = kNoId;
     ObjectId levelId = kNoId;
     Vec2 a, b;
-    double run = 120.0;
+    Polygon outline;
+    // True when the high side bears on a wall or beam (a shed roof); false
+    // when it leans on other planes at a ridge or hip with a ridge board, so
+    // the eave carries all of it, like each side of a gable.
+    bool highBearing = true;
+    double run = 0.0; // only read from older files that had no outline
 
     RoofPlane() {
         pitch = 3.0;
         hasCeiling = false;
     }
 
-    Vec2 upslope() const { return (b - a).normalized().perp(); }
-    Segment eaveLine() const { return {a, b}; }
-    Segment highLine() const { return {a + upslope() * run, b + upslope() * run}; }
-    double eaveLength() const { return distance(a, b); }
-    // Corners of the bearing area, or of the roof surface with `overhang` added.
-    Polygon outline(bool withOverhang = false) const {
-        const Vec2 down = upslope() * -(withOverhang ? overhang : 0.0);
-        const Vec2 up = upslope() * run;
-        return {a + down, b + down, b + up, a + up};
-    }
+    Vec2 along() const { return (b - a).normalized(); }
+    Vec2 upslope() const { return along().perp(); }
+    // Horizontal distance uphill from the baseline (negative in the eave overhang).
+    double upFrom(Vec2 p) const { return dot(p - a, upslope()); }
+    // Distance along the baseline from `a`.
+    double alongFrom(Vec2 p) const { return dot(p - a, along()); }
+    // Height of the roof surface above the plate line at a plan point.
+    double riseAt(Vec2 p) const { return upFrom(p) * pitch / 12.0; }
+    // The outline's extent across the slope, measured along the baseline.
+    double width() const;
+    // Farthest the outline reaches uphill, and downhill past the baseline.
+    double runLength() const;
+    double eaveOverhang() const;
+    // A rectangular plane: `length` along the baseline, rising `run`, with
+    // `overhang` past the baseline.
+    static Polygon rectangle(Vec2 a, Vec2 b, double run, double overhang);
+};
+
+// A post standing on `levelId`, carrying the beam ends above it down to
+// whatever is beneath. `memberId` names the post size from the post catalog.
+struct Post {
+    ObjectId id = kNoId;
+    ObjectId levelId = kNoId;
+    Vec2 position;
+    std::string memberId = "dfl-no2-4x4";
+    double height = 0.0; // inches; 0 means the level's wall height
 };
 
 // A dropped or flush beam on `levelId`, carrying what sits on top of it from
@@ -162,6 +216,7 @@ struct Document {
     std::string name = "Untitled";
     Site site;
     std::vector<Level> levels;
+    std::vector<WallType> wallTypes;
     std::vector<Wall> walls;
     std::vector<Opening> openings;
     std::vector<Room> rooms;
@@ -169,6 +224,7 @@ struct Document {
     std::vector<Roof> roofs;
     std::vector<RoofPlane> roofPlanes;
     std::vector<Beam> beams;
+    std::vector<Post> posts;
     ObjectId nextId = 1;
 
     ObjectId newId() { return nextId++; }
@@ -200,6 +256,12 @@ struct Document {
     // The settings of a roof or a roof plane.
     RoofSettings* roofSettings(ObjectId id);
     const RoofSettings* roofSettings(ObjectId id) const;
+    WallType* wallType(ObjectId id) { return findIn(wallTypes, id); }
+    const WallType* wallType(ObjectId id) const { return findIn(wallTypes, id); }
+    Post* post(ObjectId id) { return findIn(posts, id); }
+    const Post* post(ObjectId id) const { return findIn(posts, id); }
+    // The first wall type of a kind, or nullptr.
+    const WallType* firstWallType(WallKind kind) const;
     Beam* beam(ObjectId id) { return findIn(beams, id); }
     const Beam* beam(ObjectId id) const { return findIn(beams, id); }
 
@@ -210,6 +272,7 @@ struct Document {
     const Level* levelAbove(ObjectId levelId) const;
 
     double wallHeight(const Wall& w) const;
+    double postHeight(const Post& p) const;
     // The level an object is on (an opening's is its wall's), or kNoId.
     ObjectId levelOf(ObjectId id) const;
     bool contains(ObjectId id) const;
@@ -218,7 +281,23 @@ struct Document {
     // Removes any object by id, along with objects that depend on it
     // (openings in a removed wall, everything on a removed level).
     bool remove(ObjectId id);
+
+    // Brings derived data up to date: walls take their type's thickness and
+    // weight, and plans from older versions get wall types and roof plane
+    // outlines. Loading a file calls this.
+    void upgrade();
+    // upgrade(), then re-finds the rooms from the walls. Every edit calls this.
+    void refresh();
 };
+
+// Height of the wall plates of a level, where roofs on it bear.
+double plateHeight(const Document& doc, ObjectId levelId);
+// Height of a roof plane's surface at a plan point.
+double roofPlaneHeight(const Document& doc, const RoofPlane& plane, Vec2 p);
+// Chief Architect's "join roof planes": the outline of `plane` with edge
+// `edge` moved onto the line where it meets `other` (a hip, valley or
+// ridge). Empty when the planes are parallel or the edge cannot reach.
+Polygon joinRoofPlanes(const Document& doc, const RoofPlane& plane, int edge, const RoofPlane& other);
 
 const char* toString(RoomType t);
 // IRC Table R301.5 uniform live load for a room type, psf.

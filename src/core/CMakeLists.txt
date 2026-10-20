@@ -2,6 +2,7 @@ add_library(oa_core
     src/units.cpp
     src/geometry.cpp
     src/document.cpp
+    src/rooms.cpp
     src/undo.cpp
     src/serialization.cpp
 )

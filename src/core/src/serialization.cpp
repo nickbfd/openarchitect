@@ -22,6 +22,8 @@ NLOHMANN_JSON_SERIALIZE_ENUM(RoomType, {
 NLOHMANN_JSON_SERIALIZE_ENUM(OpeningKind, {{OpeningKind::Door, "door"}, {OpeningKind::Window, "window"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(RoofStyle, {{RoofStyle::Gable, "gable"}, {RoofStyle::Hip, "hip"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(RoofFraming, {{RoofFraming::Rafters, "rafters"}, {RoofFraming::Trusses, "trusses"}})
+NLOHMANN_JSON_SERIALIZE_ENUM(WallKind, {{WallKind::Exterior, "exterior"}, {WallKind::Interior, "interior"},
+                                       {WallKind::RoomDivider, "roomDivider"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(Axis, {{Axis::X, "x"}, {Axis::Y, "y"}})
 
 // Points are written as [x, y] to keep files compact and readable.
@@ -33,23 +35,26 @@ void from_json(const json& j, Vec2& v) {
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Rect, min, max)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Level, id, name, elevation, wallHeight, floorThickness)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Wall, id, levelId, a, b, thickness, height, bearing,
-                                                selfWeightPsf)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(WallType, id, name, kind, studDepth, studSpacing,
+                                                interiorFinish, sheathing, siding, insulated, insulation)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Wall, id, levelId, a, b, wallTypeId, thickness, height,
+                                                bearing, selfWeightPsf, roomDivider)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Opening, id, wallId, kind, offset, width, height,
-                                                sillHeight)
+                                                sillHeight, headerMemberId)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Room, id, levelId, name, type, outline)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FloorPlatform, id, levelId, area, joistAxis, deadPsf,
                                                 livePsf)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Roof, id, levelId, style, footprint, ridgeAxis, pitch,
                                                 overhang, deadPsf, framing, structuralRidge, hasCeiling,
                                                 ceilingDeadPsf, atticLivePsf, customSnow, snowPsf)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoofPlane, id, levelId, a, b, run, pitch, overhang, deadPsf,
-                                                framing, hasCeiling, ceilingDeadPsf, atticLivePsf,
-                                                customSnow, snowPsf)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoofPlane, id, levelId, a, b, outline, highBearing, run,
+                                                pitch, overhang, deadPsf, framing, hasCeiling, ceilingDeadPsf,
+                                                atticLivePsf, customSnow, snowPsf)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Post, id, levelId, position, memberId, height)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Beam, id, levelId, a, b, memberId)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Site, groundSnowPsf, exposureCe, thermalCt, importanceIs)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Document, name, site, levels, walls, openings, rooms,
-                                                platforms, roofs, roofPlanes, beams, nextId)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Document, name, site, levels, wallTypes, walls, openings,
+                                                rooms, platforms, roofs, roofPlanes, beams, posts, nextId)
 
 namespace {
 
@@ -99,7 +104,9 @@ Document documentFromJson(const std::string& text) {
         };
         scan(doc.levels); scan(doc.walls); scan(doc.openings); scan(doc.rooms);
         scan(doc.platforms); scan(doc.roofs); scan(doc.roofPlanes); scan(doc.beams);
+        scan(doc.wallTypes); scan(doc.posts);
         doc.nextId = std::max(doc.nextId, maxId + 1);
+        doc.upgrade();
         return doc;
     } catch (const json::exception& e) {
         throw FileError(std::string("The plan file is damaged: ") + e.what());
