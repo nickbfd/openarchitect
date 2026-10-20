@@ -8,11 +8,14 @@ Windows and Linux are first-class platforms. macOS is built and tested in CI on 
 
 ## What works today
 
-- **2D plan editor**: walls (with chaining, angle and end snapping), doors, windows, beams, floor framing, rooms, gable or hip roofs, and single roof planes (shed and porch roofs), on multiple levels, with the level below shown for reference. Select, move, stretch, delete, and undo or redo anything. Where objects are stacked (a beam over a window in a wall), click the same spot again, press Tab, or right-click to pick the one you want.
-- **3D view**: the same model in 3D with windows and doors set into walls, floors and roofs. Click any object to select it and edit its properties. Orbit, pan, zoom.
+- **2D plan editor**: walls (with chaining, angle and end snapping), doors, windows, beams, posts, floor framing, gable or hip roofs, and single roof planes (shed and porch roofs, or a roof built plane by plane), on multiple levels, with the level below shown for reference. Select, move, stretch, delete, and undo or redo anything. Where objects are stacked (a beam over a window in a wall), click the same spot again, press Tab, or right-click to pick the one you want.
+- **Roof planes you can reshape**: drag any corner, or the handle in the middle of any edge, to change the width, depth, eave and rake overhangs. **Join roof planes** trims an edge to the hip, valley or ridge line where it meets another plane, like Chief Architect's tool of the same name.
+- **Rooms from walls**: rooms fill the areas walls enclose and update as you edit walls, keeping their names. Room dividers are invisible walls that split an open area into rooms.
+- **Wall types**: named build-ups (6" and 4" exterior, 4" and 6" interior, room divider) with stud size, stud spacing, insulation and finish layers. Walls take their thickness and weight from their type, and you can make your own types.
+- **3D view**: the same model in 3D with windows and doors set into walls, floors, roofs and posts. Turn on **Show wall framing in 3D** to see studs at their spacing, plates, king and jack studs, headers, sills, cripples and insulation. Click any object to select it and edit its properties. Orbit, pan, zoom.
 - **Properties panel**: edit any object, the levels, and the site snow inputs. Lengths accept feet and inches as you would type them (`12' 6 1/2"`).
-- **Vertical load takedown**: roof dead, roof live and snow loads (calculated from the site, or entered per roof); rafter or truss framing; ceiling and attic loads; floor dead and live loads. Wall properties show roof, ceiling, floor and wall-above loads separately, plus the wall's own weight and the total at its base. Results are PLF per load case on each wall and beam, point loads where beams and ridge beams bear, and warnings wherever a load has no support beneath it.
-- **Beam and header sizing**: every member in the catalog (sawn lumber in 1 to 4 plies, 4x and 6x, glulam, generic LVL) checked for bending, shear, deflection and bearing, shallowest passing member first, in a table you can sort by any column, with a copyable calc report.
+- **Vertical load takedown**: roof dead, roof live and snow loads (calculated from the site, or entered per roof); rafter or truss framing; ceiling and attic loads; floor dead and live loads. Wall properties show roof, ceiling, floor and wall-above loads separately, plus the wall's own weight and the total at its base. Results are PLF per load case on each wall and beam, point loads where beams and ridge beams bear, loads on posts, and warnings wherever a load has no support beneath it.
+- **Beam, header and post sizing**: every member in the catalog (sawn lumber in 1 to 4 plies, 4x and 6x, glulam, generic LVL) checked for bending, shear, deflection and bearing, shallowest passing member first, in a table you can sort by any column, with a copyable calc report. Pick a member to assign it to the beam or to the header over a door or window; headers are limited to members that fit the wall's studs. Posts get an NDS column check and the smallest post that works.
 - **Plan files** (`.oaplan`): versioned JSON, safe saves, and a sample house under Help.
 
 See [docs/structural-method.md](docs/structural-method.md) for exactly how loads and members are calculated and what is assumed.
@@ -42,8 +45,11 @@ To build only the model and structural libraries and their tests (no Qt needed):
 | B | Beam |
 | J | Floor framing (drag a rectangle; joists run the short way) |
 | R | Roof (drag a rectangle; or Tools, Roof over this level's walls) |
-| P | Roof plane (click both ends of the eave, then click the high side) |
-| M | Room |
+| P | Roof plane (click both ends of the eave bearing line, then click the high side) |
+| K | Join roof planes (click an edge, then the plane it should meet) |
+| O | Post (click; snaps to beam and wall ends) |
+| M | Room divider (an invisible wall that separates rooms) |
+| G | Show wall framing in 3D |
 | L | Show loads on the plan |
 | F | Fit to window |
 | F2 / F3 | Plan / 3D |

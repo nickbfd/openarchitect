@@ -4,6 +4,7 @@
 
 #include "oa/core/units.h"
 #include "oa/structural/members.h"
+#include "oa/structural/posts.h"
 
 #include <QKeyEvent>
 #include <QLineF>
@@ -77,21 +78,24 @@ void PlanView::setTool(Tool tool) {
     tool_ = tool;
     anchor_.reset();
     anchor2_.reset();
+    joinEdge_.reset();
     drag_ = Drag::None;
     preview_.reset();
     setCursor(tool == Tool::Select ? Qt::ArrowCursor : Qt::CrossCursor);
     emit toolChanged(tool);
     static const char* hints[] = {
         "Click to select; click the same spot again, press Tab or right-click to pick an object underneath. "
-        "Drag to move; drag a wall end to stretch it.",
+        "Drag to move; drag a wall end to stretch it, or a roof plane's corner or edge handle to reshape it.",
         "Click to start a wall, click again to end it. Keep clicking to chain walls; right-click or Esc to stop. Ctrl turns off snapping.",
         "Click on a wall to place a door.",
         "Click on a wall to place a window.",
         "Click the two ends of a beam. It carries what sits on it from the level above.",
         "Drag a rectangle for the floor framing of this level. Joists run the short way.",
         "Drag a rectangle over the bearing walls for a roof. The ridge runs the long way.",
-        "Drag a rectangle for a room.",
-        "Click the two ends of the eave (the low edge), then click on the high side to set how far the plane runs uphill.",
+        "Click to start a room divider, an invisible wall that only separates rooms. Rooms fill the areas walls enclose.",
+        "Click the two ends of the eave bearing line (usually the wall), then click on the high side to set how far the plane runs uphill.",
+        "Click the edge of a roof plane to change, then click the roof plane it should meet. The edge moves to the hip, valley or ridge line.",
+        "Click to place a post, for example under a porch beam end. It snaps to beam and wall ends.",
     };
     emit statusMessage(hints[static_cast<int>(tool)]);
     update();
@@ -121,7 +125,7 @@ void PlanView::zoomToFit() {
         grow(r.footprint.max + Vec2{r.overhang, r.overhang});
     }
     for (const auto& r : doc().roofPlanes)
-        for (Vec2 c : r.outline(true)) grow(c);
+        for (Vec2 c : r.outline) grow(c);
     if (box.min.x > box.max.x) box = {{0, 0}, {feet(40), feet(30)}};
     const double margin = 48.0;
     const double sx = width() / (box.width() + 2 * margin);
@@ -157,6 +161,14 @@ Vec2 PlanView::snap(Vec2 p, std::optional<Vec2> from, Qt::KeyboardModifiers mods
         consider(b.a);
         consider(b.b);
     }
+    for (const auto& r : doc().roofPlanes) {
+        if (r.levelId != ws_->currentLevel()) continue;
+        for (size_t i = 0; i < r.outline.size(); ++i)
+            if (!(r.id == ws_->selection() && static_cast<int>(i) == dragIndex_ && drag_ == Drag::Vertex))
+                consider(r.outline[i]);
+    }
+    for (const auto& p : doc().posts)
+        if (p.levelId == ws_->currentLevel() && p.id != ws_->selection()) consider(p.position);
     if (hit) return *hit;
 
     if (from) {
@@ -170,11 +182,11 @@ Vec2 PlanView::snap(Vec2 p, std::optional<Vec2> from, Qt::KeyboardModifiers mods
     return {std::round(p.x), std::round(p.y)};
 }
 
-const Wall* PlanView::wallNear(Vec2 p, double pixelTolerance) const {
+const Wall* PlanView::wallNear(Vec2 p, double pixelTolerance, bool skipDividers) const {
     const Wall* best = nullptr;
     double bestDist = 1e30;
     for (const auto& w : doc().walls) {
-        if (w.levelId != ws_->currentLevel()) continue;
+        if (w.levelId != ws_->currentLevel() || (skipDividers && w.roomDivider)) continue;
         const double d = w.centerline().distanceTo(p);
         if (d <= w.thickness / 2.0 + pixelTolerance / scale_ && d < bestDist) {
             best = &w;
@@ -184,10 +196,51 @@ const Wall* PlanView::wallNear(Vec2 p, double pixelTolerance) const {
     return best;
 }
 
+std::optional<std::pair<ObjectId, int>> PlanView::roofEdgeNear(Vec2 p) const {
+    std::optional<std::pair<ObjectId, int>> best;
+    double bestDist = kPickPixels / scale_;
+    for (const auto& r : doc().roofPlanes) {
+        if (r.levelId != ws_->currentLevel()) continue;
+        for (size_t i = 0; i < r.outline.size(); ++i) {
+            const double d = Segment{r.outline[i], r.outline[(i + 1) % r.outline.size()]}.distanceTo(p);
+            if (d <= bestDist) {
+                bestDist = d;
+                best = {r.id, static_cast<int>(i)};
+            }
+        }
+    }
+    return best;
+}
+
+std::optional<int> PlanView::roofVertexAt(QPointF pos) const {
+    const RoofPlane* r = doc().roofPlane(ws_->selection());
+    if (!r) return std::nullopt;
+    for (size_t i = 0; i < r->outline.size(); ++i)
+        if (QLineF(toScreen(r->outline[i]), pos).length() <= kPickPixels) return static_cast<int>(i);
+    return std::nullopt;
+}
+
+std::optional<int> PlanView::roofEdgeHandleAt(QPointF pos) const {
+    const RoofPlane* r = doc().roofPlane(ws_->selection());
+    if (!r) return std::nullopt;
+    const size_t n = r->outline.size();
+    for (size_t i = 0; i < n; ++i)
+        if (QLineF(toScreen((r->outline[i] + r->outline[(i + 1) % n]) * 0.5), pos).length() <= kPickPixels)
+            return static_cast<int>(i);
+    return std::nullopt;
+}
+
 std::vector<ObjectId> PlanView::pickAll(Vec2 p) const {
     const ObjectId level = ws_->currentLevel();
     const double tol = kPickPixels / scale_;
     std::vector<ObjectId> hits;
+
+    for (const auto& post : doc().posts) {
+        const auto* m = structural::findPost(post.memberId);
+        const double half = (m ? m->d : 3.5) / 2.0 + tol;
+        if (post.levelId == level && std::abs(p.x - post.position.x) <= half && std::abs(p.y - post.position.y) <= half)
+            hits.push_back(post.id);
+    }
 
     for (const auto& b : doc().beams)
         if (b.levelId == level && b.centerline().distanceTo(p) <= 3.0 + tol) hits.push_back(b.id);
@@ -208,9 +261,8 @@ std::vector<ObjectId> PlanView::pickAll(Vec2 p) const {
         return false;
     };
     for (const auto& r : doc().roofPlanes) {
-        if (r.levelId != level) continue;
-        const Polygon outline = r.outline(true);
-        if (nearEdges(outline, tol) || (contains(outline, p) && nearEdges(outline, std::max(r.overhang, 12.0) + tol)))
+        if (r.levelId != level || r.outline.size() < 3) continue;
+        if (nearEdges(r.outline, tol) || (contains(r.outline, p) && nearEdges(r.outline, 18.0 + tol)))
             hits.push_back(r.id);
     }
     for (const auto& r : doc().roofs) {
@@ -289,6 +341,7 @@ void PlanView::paintEvent(QPaintEvent*) {
     drawBeams(g);
     drawRoofs(g);
     drawRoofPlanes(g);
+    drawPosts(g);
     if (showLoads_) drawLoads(g);
     drawToolPreview(g);
 
@@ -383,6 +436,11 @@ void PlanView::drawWalls(QPainter& g) const {
     };
     for (const auto& w : d.walls) {
         if (w.levelId != ws_->currentLevel() || w.length() < 1e-6) continue;
+        if (w.roomDivider) {
+            g.setPen(QPen(QColor(120, 140, 170), 1.5, Qt::DashLine));
+            g.drawLine(toScreen(w.a), toScreen(w.b));
+            continue;
+        }
         const Vec2 dir = (w.b - w.a).normalized();
         const Vec2 n = dir.perp() * (w.thickness / 2.0);
         // Extend into corners so joined walls read as one solid outline.
@@ -397,7 +455,7 @@ void PlanView::drawWalls(QPainter& g) const {
     }
     // Selection drawn on top so it is not hidden by a neighbor.
     if (const Wall* w = d.wall(ws_->selection()); w && w->levelId == ws_->currentLevel()) {
-        const Vec2 n = (w->b - w->a).normalized().perp() * (w->thickness / 2.0 + 1.0 / scale_);
+        const Vec2 n = (w->b - w->a).normalized().perp() * (std::max(w->thickness, 2.0) / 2.0 + 1.0 / scale_);
         QPolygonF poly;
         poly << toScreen(w->a + n) << toScreen(w->b + n) << toScreen(w->b - n) << toScreen(w->a - n);
         g.setPen(QPen(QColor(30, 110, 220), 2));
@@ -508,37 +566,70 @@ void PlanView::drawRoofs(QPainter& g) const {
 
 void PlanView::drawRoofPlanes(QPainter& g) const {
     for (const auto& r : doc().roofPlanes) {
-        if (r.levelId != ws_->currentLevel() || r.eaveLength() < 1e-6) continue;
+        if (r.levelId != ws_->currentLevel() || r.outline.size() < 3) continue;
         const bool selected = r.id == ws_->selection();
         const QColor color = selected ? QColor(30, 110, 220) : QColor(150, 60, 60);
-        auto poly = [this](const Polygon& c) {
-            QPolygonF out;
-            for (Vec2 p : c) out << toScreen(p);
-            return out;
-        };
+        QPolygonF poly;
+        for (Vec2 p : r.outline) poly << toScreen(p);
         g.setPen(QPen(color, selected ? 2 : 1, Qt::DashLine));
         g.setBrush(selected ? QColor(30, 110, 220, 30) : QColor(150, 60, 60, 18));
-        g.drawPolygon(poly(r.outline(true)));
-        // Bearing lines: the eave and the high side.
+        g.drawPolygon(poly);
+        // The bearing line along the eave wall or beam.
         g.setPen(QPen(color, selected ? 2 : 1));
-        const Segment high = r.highLine();
         g.drawLine(toScreen(r.a), toScreen(r.b));
-        g.drawLine(toScreen(high.a), toScreen(high.b));
 
         // Arrow pointing downhill from the middle of the plane.
         const Vec2 up = r.upslope();
-        const Vec2 mid = (r.a + r.b) * 0.5 + up * (r.run * 0.5);
-        const double arrow = std::min(r.run * 0.35, 48.0);
+        const Vec2 mid = centroid(r.outline);
+        const double arrow = std::min(r.runLength() * 0.3, 48.0);
         const Vec2 tip = mid - up * arrow;
         g.drawLine(toScreen(mid + up * arrow), toScreen(tip));
-        const Vec2 along = (r.b - r.a).normalized();
+        const Vec2 along = r.along();
         const double head = std::min(arrow * 0.4, 10.0 / scale_ * 1.5);
         QPolygonF arrowHead;
         arrowHead << toScreen(tip) << toScreen(tip + up * head + along * head * 0.6) << toScreen(tip + up * head - along * head * 0.6);
         g.setBrush(color);
         g.drawPolygon(arrowHead);
-        const QPointF labelAt = toScreen(r.a - up * r.overhang) + QPointF(-up.x * 14 + 2, up.y * 14 + 4);
-        g.drawText(labelAt, QString("Roof plane, %1/12").arg(r.pitch));
+        g.drawText(toScreen(mid + up * arrow) + QPointF(6, 0),
+                   QString("%1/12%2").arg(r.pitch).arg(r.highBearing ? "" : ", to ridge"));
+
+        if (!selected) continue;
+        // Handles: squares at the corners, diamonds mid-edge, with each edge's length.
+        const size_t n = r.outline.size();
+        for (size_t i = 0; i < n; ++i) {
+            const Vec2 p = r.outline[i], q = r.outline[(i + 1) % n];
+            const Vec2 out = (q - p).normalized().perp() * (-16.0 / scale_);
+            drawLengthLabel(g, p + out, q + out);
+        }
+        g.setPen(QPen(QColor(30, 110, 220), 1.5));
+        g.setBrush(Qt::white);
+        for (size_t i = 0; i < n; ++i) {
+            const QPointF c = toScreen(r.outline[i]);
+            g.drawRect(QRectF(c.x() - 4, c.y() - 4, 8, 8));
+            const QPointF m = toScreen((r.outline[i] + r.outline[(i + 1) % n]) * 0.5);
+            QPolygonF diamond;
+            diamond << m + QPointF(0, -5) << m + QPointF(5, 0) << m + QPointF(0, 5) << m + QPointF(-5, 0);
+            g.drawPolygon(diamond);
+        }
+    }
+}
+
+void PlanView::drawPosts(QPainter& g) const {
+    for (const auto& p : doc().posts) {
+        if (p.levelId != ws_->currentLevel()) continue;
+        const auto* m = structural::findPost(p.memberId);
+        const double bx = (m ? m->b : 3.5) / 2.0, by = (m ? m->d : 3.5) / 2.0;
+        const QRectF box(toScreen(p.position + Vec2{-bx, by}), toScreen(p.position + Vec2{bx, -by}));
+        const QRectF shown = box.width() < 8 ? QRectF(box.center() - QPointF(4, 4), QSizeF(8, 8)) : box;
+        const bool selected = p.id == ws_->selection();
+        const QColor color = selected ? QColor(30, 110, 220) : QColor(140, 80, 20);
+        g.setPen(QPen(color, selected ? 2 : 1.5));
+        g.setBrush(QColor(235, 200, 150));
+        g.drawRect(shown);
+        g.drawLine(shown.topLeft(), shown.bottomRight());
+        g.drawLine(shown.topRight(), shown.bottomLeft());
+        if (selected || scale_ > 1.5)
+            g.drawText(shown.topRight() + QPointF(4, -2), m ? QString::fromStdString(m->name).section(' ', 0, 0) : "Post");
     }
 }
 
@@ -605,15 +696,47 @@ void PlanView::drawToolPreview(QPainter& g) const {
     switch (tool_) {
     case Tool::Wall:
     case Tool::Beam:
+    case Tool::RoomDivider:
         if (anchor_) {
-            g.setPen(QPen(QColor(30, 110, 220, 160), std::max(2.0, pixels(tool_ == Tool::Wall ? 5.5 : 3.5))));
+            if (tool_ == Tool::RoomDivider) {
+                g.setPen(QPen(QColor(30, 110, 220, 200), 2, Qt::DashLine));
+            } else {
+                const WallType* t = doc().wallType(wallTypeId_);
+                const double width = tool_ == Tool::Wall ? (t ? t->thickness() : 5.5) : 3.5;
+                g.setPen(QPen(QColor(30, 110, 220, 160), std::max(2.0, pixels(width))));
+            }
             g.drawLine(toScreen(*anchor_), toScreen(cursor_));
             drawLengthLabel(g, *anchor_, cursor_);
         }
         break;
+    case Tool::Post: {
+        const QPointF c = toScreen(cursor_);
+        const double half = std::max(4.0, pixels(1.75));
+        g.setBrush(QColor(30, 110, 220, 80));
+        g.drawRect(QRectF(c.x() - half, c.y() - half, 2 * half, 2 * half));
+        break;
+    }
+    case Tool::JoinPlanes: {
+        auto edgeOf = [this](const std::pair<ObjectId, int>& e) -> std::optional<Segment> {
+            const RoofPlane* r = doc().roofPlane(e.first);
+            if (!r || e.second >= static_cast<int>(r->outline.size())) return std::nullopt;
+            return Segment{r->outline[e.second], r->outline[(e.second + 1) % r->outline.size()]};
+        };
+        if (joinEdge_) {
+            if (auto s = edgeOf(*joinEdge_)) {
+                g.setPen(QPen(QColor(30, 110, 220), 4));
+                g.drawLine(toScreen(s->a), toScreen(s->b));
+            }
+        } else if (auto near = roofEdgeNear(cursor_)) {
+            if (auto s = edgeOf(*near)) {
+                g.setPen(QPen(QColor(30, 110, 220, 140), 4));
+                g.drawLine(toScreen(s->a), toScreen(s->b));
+            }
+        }
+        break;
+    }
     case Tool::Floor:
     case Tool::Roof:
-    case Tool::Room:
         if (anchor_) {
             const Rect r = Rect::fromPoints(*anchor_, cursor_);
             g.drawRect(QRectF(toScreen({r.min.x, r.max.y}), toScreen({r.max.x, r.min.y})));
@@ -623,7 +746,7 @@ void PlanView::drawToolPreview(QPainter& g) const {
         break;
     case Tool::Door:
     case Tool::Window:
-        if (const Wall* w = wallNear(cursor_, kPickPixels)) {
+        if (const Wall* w = wallNear(cursor_, kPickPixels, true)) {
             const double width = 36.0;
             const double along = std::clamp(w->centerline().project(cursor_) * w->length(), width / 2, w->length() - width / 2);
             const Vec2 dir = (w->b - w->a).normalized();
@@ -641,20 +764,18 @@ void PlanView::drawToolPreview(QPainter& g) const {
             g.drawLine(toScreen(*anchor_), toScreen(cursor_));
             drawLengthLabel(g, *anchor_, cursor_);
         } else if (anchor_ && anchor2_) {
-            RoofPlane r;
-            r.a = *anchor_;
-            r.b = *anchor2_;
-            const double run = cross((r.b - r.a).normalized(), cursor_ - r.a);
-            if (run < 0) std::swap(r.a, r.b);
-            r.run = std::abs(run);
+            Vec2 a = *anchor_, b = *anchor2_;
+            const double run = cross((b - a).normalized(), cursor_ - a);
+            if (run < 0) std::swap(a, b);
+            const RoofPlane defaults;
             QPolygonF poly;
-            for (Vec2 p : r.outline()) poly << toScreen(p);
+            for (Vec2 p : RoofPlane::rectangle(a, b, std::abs(run), defaults.overhang)) poly << toScreen(p);
             g.setBrush(QColor(150, 60, 60, 40));
             g.drawPolygon(poly);
             g.setPen(QPen(QColor(150, 60, 60), 2));
-            g.drawLine(toScreen(r.a), toScreen(r.b));
-            const Segment high = r.highLine();
-            drawLengthLabel(g, (r.a + r.b) * 0.5, (high.a + high.b) * 0.5);
+            g.drawLine(toScreen(a), toScreen(b));
+            const Vec2 up = (b - a).normalized().perp() * std::abs(run);
+            drawLengthLabel(g, (a + b) * 0.5, (a + b) * 0.5 + up);
         }
         break;
     case Tool::Select:
@@ -671,9 +792,9 @@ void PlanView::drawToolPreview(QPainter& g) const {
 // ---- Editing ---------------------------------------------------------------
 
 void PlanView::placeOpening(Vec2 p, OpeningKind kind) {
-    const Wall* w = wallNear(p, kPickPixels);
+    const Wall* w = wallNear(p, kPickPixels, true);
     if (!w) {
-        emit statusMessage("Click on a wall to place it.");
+        emit statusMessage("Click on a wall to place it. Room dividers can't have doors or windows.");
         return;
     }
     const ObjectId wallId = w->id;
@@ -723,17 +844,6 @@ void PlanView::finishRect(Vec2 a, Vec2 b) {
             created = roof.id;
         });
         break;
-    case Tool::Room:
-        ws_->edit("Add room", [&](Document& d) {
-            Room room;
-            room.id = d.newId();
-            room.levelId = level;
-            room.name = "Room";
-            room.outline = r.corners();
-            d.rooms.push_back(room);
-            created = room.id;
-        });
-        break;
     default:
         return;
     }
@@ -755,11 +865,82 @@ void PlanView::finishRoofPlane(Vec2 a, Vec2 b, Vec2 high) {
         r.levelId = level;
         r.a = a;
         r.b = b;
-        r.run = std::round(std::abs(run));
+        r.outline = RoofPlane::rectangle(a, b, std::round(std::abs(run)), r.overhang);
         d.roofPlanes.push_back(r);
         created = r.id;
     });
     ws_->select(created);
+}
+
+void PlanView::addWall(Vec2 a, Vec2 b) {
+    const ObjectId level = ws_->currentLevel();
+    const Document& current = ws_->doc();
+    const WallType* type = tool_ == Tool::RoomDivider ? current.firstWallType(WallKind::RoomDivider)
+                                                      : current.wallType(wallTypeId_);
+    if (!type && tool_ == Tool::Wall) type = current.firstWallType(WallKind::Exterior);
+    const ObjectId typeId = type ? type->id : kNoId;
+    const bool divider = tool_ == Tool::RoomDivider;
+    ObjectId created = kNoId;
+    ws_->edit(divider ? "Add room divider" : "Add wall", [&](Document& d) {
+        Wall w;
+        w.id = d.newId();
+        w.levelId = level;
+        w.a = a;
+        w.b = b;
+        w.wallTypeId = typeId;
+        w.roomDivider = divider;
+        if (divider) {
+            w.bearing = false;
+            w.thickness = 0.0;
+        }
+        d.walls.push_back(w);
+        created = w.id;
+    });
+    ws_->select(created);
+}
+
+void PlanView::placePost(Vec2 p) {
+    const ObjectId level = ws_->currentLevel();
+    ObjectId created = kNoId;
+    ws_->edit("Add post", [&](Document& d) {
+        Post post;
+        post.id = d.newId();
+        post.levelId = level;
+        post.position = p;
+        d.posts.push_back(post);
+        created = post.id;
+    });
+    ws_->select(created);
+}
+
+void PlanView::joinClick(Vec2 p) {
+    if (!joinEdge_) {
+        joinEdge_ = roofEdgeNear(p);
+        emit statusMessage(joinEdge_ ? "Now click the roof plane this edge should meet."
+                                     : "Click right on an edge of a roof plane.");
+        if (joinEdge_) ws_->select(joinEdge_->first);
+        return;
+    }
+    const auto [planeId, edge] = *joinEdge_;
+    const RoofPlane* other = nullptr;
+    for (const auto& r : doc().roofPlanes)
+        if (r.id != planeId && r.levelId == ws_->currentLevel() && r.outline.size() >= 3 &&
+            (contains(r.outline, p) || roofEdgeNear(p).value_or(std::pair<ObjectId, int>{kNoId, 0}).first == r.id))
+            other = &r;
+    const RoofPlane* plane = doc().roofPlane(planeId);
+    if (!other || !plane) {
+        emit statusMessage("Click inside another roof plane to join to it, or Esc to start over.");
+        return;
+    }
+    const Polygon joined = joinRoofPlanes(doc(), *plane, edge, *other);
+    if (joined.size() < 3 || area(joined) < 144.0) {
+        emit statusMessage("Those planes don't meet along that edge. Try another edge, or check the pitches.");
+        joinEdge_.reset();
+        return;
+    }
+    ws_->edit("Join roof planes", [&](Document& d) { d.roofPlane(planeId)->outline = joined; });
+    joinEdge_.reset();
+    emit statusMessage("Joined. Click another edge to keep going.");
 }
 
 void PlanView::deleteSelection() {
@@ -784,6 +965,7 @@ void PlanView::mousePressEvent(QMouseEvent* e) {
         }
         anchor_.reset();
         anchor2_.reset();
+        joinEdge_.reset();
         update();
         return;
     }
@@ -804,6 +986,14 @@ void PlanView::mousePressEvent(QMouseEvent* e) {
             if (QLineF(toScreen(a), pos).length() < kPickPixels) drag_ = Drag::EndA;
             else if (QLineF(toScreen(b), pos).length() < kPickPixels) drag_ = Drag::EndB;
         }
+        // Or a corner or edge handle of a selected roof plane.
+        if (auto v = roofVertexAt(pos)) {
+            drag_ = Drag::Vertex;
+            dragIndex_ = *v;
+        } else if (auto edge = roofEdgeHandleAt(pos)) {
+            drag_ = Drag::Edge;
+            dragIndex_ = *edge;
+        }
         cycleOnRelease_ = false;
         if (drag_ == Drag::None) {
             const auto hits = pickAll(raw);
@@ -815,7 +1005,8 @@ void PlanView::mousePressEvent(QMouseEvent* e) {
                 cycleOnRelease_ = hits.size() > 1 && hits == stack_;
             }
             selectFromStack(hits, hit);
-            if (doc().wall(hit) || doc().beam(hit) || doc().opening(hit) || doc().roofPlane(hit)) drag_ = Drag::Move;
+            if (doc().wall(hit) || doc().beam(hit) || doc().opening(hit) || doc().roofPlane(hit) || doc().post(hit))
+                drag_ = Drag::Move;
         }
         if (drag_ != Drag::None) {
             dragStart_ = raw;
@@ -824,22 +1015,15 @@ void PlanView::mousePressEvent(QMouseEvent* e) {
         break;
     }
     case Tool::Wall:
+    case Tool::RoomDivider:
     case Tool::Beam:
         if (!anchor_) {
             anchor_ = p;
         } else if (distance(*anchor_, p) >= 1.0) {
             const Vec2 a = *anchor_;
             ObjectId created = kNoId;
-            if (tool_ == Tool::Wall) {
-                ws_->edit("Add wall", [&](Document& d) {
-                    Wall w;
-                    w.id = d.newId();
-                    w.levelId = level;
-                    w.a = a;
-                    w.b = p;
-                    d.walls.push_back(w);
-                    created = w.id;
-                });
+            if (tool_ != Tool::Beam) {
+                addWall(a, p);
                 anchor_ = p; // keep chaining
             } else {
                 ws_->edit("Add beam", [&](Document& d) {
@@ -852,9 +1036,15 @@ void PlanView::mousePressEvent(QMouseEvent* e) {
                     created = b.id;
                 });
                 anchor_.reset();
+                ws_->select(created);
             }
-            ws_->select(created);
         }
+        break;
+    case Tool::Post:
+        placePost(p);
+        break;
+    case Tool::JoinPlanes:
+        joinClick(raw);
         break;
     case Tool::Door:
         placeOpening(raw, OpeningKind::Door);
@@ -864,7 +1054,6 @@ void PlanView::mousePressEvent(QMouseEvent* e) {
         break;
     case Tool::Floor:
     case Tool::Roof:
-    case Tool::Room:
         anchor_ = p;
         break;
     case Tool::RoofPlane:
@@ -892,7 +1081,8 @@ void PlanView::mouseMoveEvent(QMouseEvent* e) {
         return;
     }
     const Vec2 raw = toWorld(pos);
-    const bool twoPoint = tool_ == Tool::Wall || tool_ == Tool::Beam || (tool_ == Tool::RoofPlane && !anchor2_);
+    const bool twoPoint = tool_ == Tool::Wall || tool_ == Tool::RoomDivider || tool_ == Tool::Beam ||
+                          (tool_ == Tool::RoofPlane && !anchor2_);
     cursor_ = snap(raw, twoPoint ? anchor_ : std::nullopt, e->modifiers());
 
     if (drag_ != Drag::None && preview_) {
@@ -914,8 +1104,24 @@ void PlanView::mouseMoveEvent(QMouseEvent* e) {
                 (drag_ == Drag::EndA ? b->a : b->b) = snap(raw, drag_ == Drag::EndA ? b->b : b->a, e->modifiers());
             }
         } else if (RoofPlane* r = d.roofPlane(sel)) {
-            r->a += delta;
-            r->b += delta;
+            const int n = static_cast<int>(r->outline.size());
+            if (drag_ == Drag::Vertex && dragIndex_ < n) {
+                r->outline[dragIndex_] = snap(raw, std::nullopt, e->modifiers());
+            } else if (drag_ == Drag::Edge && dragIndex_ < n) {
+                // Slide the edge square to itself; its neighbors keep their directions.
+                const Vec2 p0 = r->outline[dragIndex_], p1 = r->outline[(dragIndex_ + 1) % n];
+                const Vec2 normal = (p1 - p0).normalized().perp();
+                double offset = dot(raw - dragStart_, normal);
+                if (!(e->modifiers() & Qt::ControlModifier)) offset = std::round(offset);
+                const Polygon moved = moveEdge(r->outline, dragIndex_, offset);
+                if (moved.size() == r->outline.size() && area(moved) > 144.0) r->outline = moved;
+            } else {
+                r->a += delta;
+                r->b += delta;
+                for (Vec2& p : r->outline) p += delta;
+            }
+        } else if (Post* post = d.post(sel)) {
+            post->position = snap(raw, std::nullopt, e->modifiers());
         } else if (Opening* o = d.opening(sel)) {
             if (const Wall* w = d.wall(o->wallId))
                 o->offset = std::round(std::clamp(w->centerline().project(raw) * w->length(), o->width / 2,
@@ -947,7 +1153,8 @@ void PlanView::mouseReleaseEvent(QMouseEvent* e) {
         if (preview_ && distance(toWorld(e->position()), dragStart_) * scale_ > 2.0) {
             Document result = std::move(*preview_);
             preview_.reset();
-            ws_->edit(kind == Drag::Move ? "Move" : "Stretch", [&](Document& d) { d = std::move(result); });
+            const char* text = kind == Drag::Move ? "Move" : kind == Drag::Vertex || kind == Drag::Edge ? "Reshape roof plane" : "Stretch";
+            ws_->edit(text, [&](Document& d) { d = std::move(result); });
         } else {
             preview_.reset();
             if (cycleOnRelease_) cycleStack();
@@ -956,7 +1163,7 @@ void PlanView::mouseReleaseEvent(QMouseEvent* e) {
         update();
         return;
     }
-    if ((tool_ == Tool::Floor || tool_ == Tool::Roof || tool_ == Tool::Room) && anchor_) {
+    if ((tool_ == Tool::Floor || tool_ == Tool::Roof) && anchor_) {
         const Vec2 a = *anchor_;
         anchor_.reset();
         finishRect(a, cursor_);
@@ -965,7 +1172,7 @@ void PlanView::mouseReleaseEvent(QMouseEvent* e) {
 }
 
 void PlanView::mouseDoubleClickEvent(QMouseEvent* e) {
-    if (tool_ == Tool::Wall) anchor_.reset();
+    if (tool_ == Tool::Wall || tool_ == Tool::RoomDivider) anchor_.reset();
     QWidget::mouseDoubleClickEvent(e);
 }
 
@@ -981,9 +1188,10 @@ void PlanView::wheelEvent(QWheelEvent* e) {
 void PlanView::keyPressEvent(QKeyEvent* e) {
     switch (e->key()) {
     case Qt::Key_Escape:
-        if (anchor_ || drag_ != Drag::None) {
+        if (anchor_ || joinEdge_ || drag_ != Drag::None) {
             anchor_.reset();
             anchor2_.reset();
+            joinEdge_.reset();
             drag_ = Drag::None;
             preview_.reset();
             update();

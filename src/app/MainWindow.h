@@ -25,6 +25,7 @@ protected:
 private:
     void createActions();
     void refreshLevels();
+    void refreshWallTypes();
     void updateTitle();
     void updateUndoActions();
     bool maybeSave();
@@ -39,6 +40,7 @@ private:
     ModelView3D* model_;
     QTabWidget* tabs_;
     QComboBox* levelBox_;
+    QComboBox* wallTypeBox_ = nullptr;
     QAction* undoAction_ = nullptr;
     QAction* redoAction_ = nullptr;
 };

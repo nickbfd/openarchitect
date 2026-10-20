@@ -1,6 +1,7 @@
 #include "Mesh.h"
 
 #include "oa/structural/members.h"
+#include "oa/structural/posts.h"
 
 #include <algorithm>
 #include <cmath>
@@ -20,6 +21,16 @@ constexpr Color kGable{0.88f, 0.85f, 0.78f};
 constexpr Color kGlass{0.55f, 0.72f, 0.85f};
 constexpr Color kDoor{0.55f, 0.38f, 0.24f};
 constexpr Color kSelected{0.25f, 0.55f, 0.95f};
+constexpr Color kPost{0.80f, 0.58f, 0.33f};
+constexpr Color kLumber{0.87f, 0.74f, 0.52f};
+constexpr Color kHeader{0.80f, 0.55f, 0.30f};
+constexpr Color kInsulation{0.96f, 0.68f, 0.72f};
+
+// Depth of the header over an opening: its assigned member, or a 2x10.
+double headerDepth(const Opening& o) {
+    if (const auto* m = structural::findMember(o.headerMemberId)) return m->d;
+    return 9.25;
+}
 
 class Builder {
 public:
@@ -71,7 +82,7 @@ public:
 
 void addWall(Builder& b, const Document& doc, const Wall& w) {
     const Level* level = doc.level(w.levelId);
-    if (!level || w.length() < 1e-6) return;
+    if (!level || w.length() < 1e-6 || w.roomDivider) return;
     const double z0 = level->elevation;
     const double h = doc.wallHeight(w);
     const Vec2 dir = (w.b - w.a).normalized();
@@ -128,25 +139,123 @@ constexpr double kHeel = 8.0;
 
 void addRoofPlane(Builder& b, const Document& doc, const RoofPlane& r) {
     const Level* level = doc.level(r.levelId);
-    if (!level || r.eaveLength() < 1.0 || r.run < 1.0) return;
+    if (!level || r.outline.size() < 3 || distance(r.a, r.b) < 1.0) return;
     const double slope = r.pitch / 12.0;
-    const double wallTop = level->elevation + level->wallHeight;
-    const double plate = wallTop + kHeel;
-    const Vec2 up = r.upslope();
-    auto at = [](Vec2 p, double z) { return Vec3{p.x, p.y, z}; };
+    const double wallTop = plateHeight(doc, r.levelId);
+    auto surface = [&](Vec2 p) { return Vec3{p.x, p.y, wallTop + kHeel + r.riseAt(p)}; };
 
-    const Vec2 e0 = r.a - up * r.overhang, e1 = r.b - up * r.overhang;
-    const Segment high = r.highLine();
-    const double eaveZ = plate - r.overhang * slope;
-    const double highZ = plate + r.run * slope;
-    b.quad(at(e0, eaveZ), at(e1, eaveZ), at(high.b, highZ), at(high.a, highZ), kRoof);
-    // Fill below the plane at both ends and along the high side.
-    b.triangle(at(r.b, plate), at(high.b, plate), at(high.b, highZ), kGable);
-    b.triangle(at(high.a, plate), at(r.a, plate), at(high.a, highZ), kGable);
-    b.quad(at(r.a, wallTop), at(r.b, wallTop), at(r.b, plate), at(r.a, plate), kGable);
-    b.quad(at(high.b, wallTop), at(high.a, wallTop), at(high.a, highZ), at(high.b, highZ), kGable);
-    b.quad(at(r.b, wallTop), at(high.b, wallTop), at(high.b, plate), at(r.b, plate), kGable);
-    b.quad(at(high.a, wallTop), at(r.a, wallTop), at(r.a, plate), at(high.a, plate), kGable);
+    for (const auto& t : triangulate(r.outline))
+        b.triangle(surface(r.outline[t[0]]), surface(r.outline[t[1]]), surface(r.outline[t[2]]), kRoof);
+
+    // Close the gap between the walls under the plane and its underside: the
+    // band over the eave wall, the gable triangles at the rakes, and the
+    // wall under a shed roof's high side.
+    if (slope < 1e-6) return;
+    const double lowest = -kHeel / slope; // uphill distance where the surface meets the wall top
+    for (const auto& w : doc.walls) {
+        if (w.levelId != r.levelId || w.roomDivider) continue;
+        for (auto [t0, t1] : clipToPolygon(w.centerline(), r.outline)) {
+            const Vec2 q0 = lerp(w.a, w.b, t0), q1 = lerp(w.a, w.b, t1);
+            const double s0 = r.upFrom(q0), s1 = r.upFrom(q1);
+            if (s0 < lowest && s1 < lowest) continue;
+            Vec2 p0 = q0, p1 = q1;
+            if (s0 < lowest) p0 = lerp(q0, q1, (lowest - s0) / (s1 - s0));
+            if (s1 < lowest) p1 = lerp(q0, q1, (lowest - s0) / (s1 - s0));
+            b.quad({p0.x, p0.y, wallTop}, {p1.x, p1.y, wallTop}, surface(p1), surface(p0), kGable);
+        }
+    }
+}
+
+void addPost(Builder& b, const Document& doc, const Post& post) {
+    const Level* level = doc.level(post.levelId);
+    if (!level) return;
+    double size = 3.5;
+    if (const auto* m = structural::findPost(post.memberId)) size = m->b;
+    b.box(post.position - Vec2{size / 2.0, 0}, {1, 0}, size, size, level->elevation,
+          level->elevation + doc.postHeight(post), kPost);
+}
+
+// Framing of a wall from its type: plates, studs on their spacing, and at
+// each opening king and jack studs, a header, a sill and cripples.
+void addWallFraming(Builder& b, const Document& doc, const Wall& w) {
+    const Level* level = doc.level(w.levelId);
+    const WallType* type = doc.wallType(w.wallTypeId);
+    if (!level || !type || type->isDivider() || w.length() < 1e-6) return;
+    const double z0 = level->elevation;
+    const double h = doc.wallHeight(w);
+    const Vec2 dir = (w.b - w.a).normalized();
+    const double len = w.length();
+    const double depth = type->studDepth;
+    // The studs sit toward the outside face of exterior walls, centered otherwise.
+    const double shift = type->kind == WallKind::Exterior
+                             ? (w.thickness / 2.0 - type->siding - type->sheathing - depth / 2.0)
+                             : 0.0;
+    const Vec2 base = w.a + dir.perp() * -shift;
+    auto stick = [&](double s0, double s1, double za, double zb, Color c, double width) {
+        b.box(base + dir * s0, dir, s1 - s0, width, z0 + za, z0 + zb, c);
+    };
+    constexpr double t = 1.5;
+    b.owner = w.id;
+    stick(0, len, 0, t, kLumber, depth);           // bottom plate
+    stick(0, len, h - 2 * t, h, kLumber, depth);   // double top plate
+
+    struct Hole {
+        double s0, s1, sill, head;
+        const Opening* o;
+    };
+    std::vector<Hole> holes;
+    for (const Opening* o : doc.openingsIn(w.id)) {
+        const double s0 = std::clamp(o->offset - o->width / 2.0, 0.0, len);
+        const double s1 = std::clamp(o->offset + o->width / 2.0, 0.0, len);
+        holes.push_back({s0, s1, std::clamp(o->sillHeight, 0.0, h), std::clamp(o->topHeight(), 0.0, h - 2 * t), o});
+    }
+    auto inHole = [&](double s0, double s1) {
+        for (const auto& hl : holes)
+            if (s1 > hl.s0 - 2 * t - 1e-6 && s0 < hl.s1 + 2 * t + 1e-6) return &hl;
+        return static_cast<const Hole*>(nullptr);
+    };
+
+    // Common studs and cripples on the layout, measured from the wall start.
+    const double spacing = std::max(type->studSpacing, 8.0);
+    std::vector<double> layout{0.0};
+    for (double s = spacing - t / 2.0; s < len - t; s += spacing) layout.push_back(s);
+    layout.push_back(len - t);
+    for (double s : layout) {
+        if (const Hole* hl = inHole(s, s + t)) {
+            if (s < hl->s0 - 2 * t + 1e-6 || s + t > hl->s1 + 2 * t - 1e-6) continue; // king and jack go there
+            const double headerTop = hl->head + headerDepth(*hl->o);
+            if (headerTop < h - 2 * t - 0.5) stick(s, s + t, headerTop, h - 2 * t, kLumber, depth);
+            if (hl->sill > 2 * t + 0.5) stick(s, s + t, t, hl->sill - t, kLumber, depth);
+            continue;
+        }
+        stick(s, s + t, t, h - 2 * t, kLumber, depth);
+    }
+    for (const auto& hl : holes) {
+        const double hd = headerDepth(*hl.o);
+        const double top = std::min(hl.head + hd, h - 2 * t);
+        stick(hl.s0 - 2 * t, hl.s0 - t, t, h - 2 * t, kLumber, depth);  // king
+        stick(hl.s1 + t, hl.s1 + 2 * t, t, h - 2 * t, kLumber, depth);  // king
+        stick(hl.s0 - t, hl.s0, t, hl.head, kLumber, depth);            // jack
+        stick(hl.s1, hl.s1 + t, t, hl.head, kLumber, depth);            // jack
+        b.owner = hl.o->id;
+        stick(hl.s0 - t, hl.s1 + t, hl.head, top, kHeader, depth);
+        if (hl.sill > 2 * t) stick(hl.s0, hl.s1, hl.sill - t, hl.sill, kLumber, depth);
+        b.owner = w.id;
+    }
+
+    // Insulation fills the bays between plates, around the openings.
+    if (!type->insulated) return;
+    double cursor = 0.0;
+    auto bay = [&](double s0, double s1, double za, double zb) {
+        if (s1 - s0 > 0.5 && zb - za > 0.5) stick(s0, s1, za, zb, kInsulation, depth * 0.5);
+    };
+    for (const auto& hl : holes) {
+        bay(cursor, hl.s0 - 2 * t, t, h - 2 * t);
+        bay(hl.s0, hl.s1, hl.head + headerDepth(*hl.o), h - 2 * t);
+        bay(hl.s0, hl.s1, t, hl.sill - t);
+        cursor = std::max(cursor, hl.s1 + 2 * t);
+    }
+    bay(cursor, len, t, h - 2 * t);
 }
 
 void addRoof(Builder& b, const Document& doc, const Roof& roof) {
@@ -192,14 +301,21 @@ void addRoof(Builder& b, const Document& doc, const Roof& roof) {
 
 } // namespace
 
-Mesh buildMesh(const Document& doc, ObjectId selected) {
+Mesh buildMesh(const Document& doc, ObjectId selected, bool framing) {
     Builder b;
     b.selected = selected;
     for (const auto& p : doc.platforms) {
         b.owner = p.id;
         addPlatform(b, doc, p);
     }
-    for (const auto& w : doc.walls) addWall(b, doc, w);
+    for (const auto& w : doc.walls) {
+        if (framing && doc.wallType(w.wallTypeId)) addWallFraming(b, doc, w);
+        else addWall(b, doc, w);
+    }
+    for (const auto& post : doc.posts) {
+        b.owner = post.id;
+        addPost(b, doc, post);
+    }
     for (const auto& beam : doc.beams) {
         b.owner = beam.id;
         addBeam(b, doc, beam);

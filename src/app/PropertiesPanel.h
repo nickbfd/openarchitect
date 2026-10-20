@@ -42,7 +42,9 @@ private:
     void showBeam(const oa::Beam& b);
     void showRoof(const oa::Roof& r);
     void showRoofPlane(const oa::RoofPlane& p);
-    void showRoofSettings(oa::ObjectId id, const oa::RoofSettings& r);
+    void showRoofSettings(oa::ObjectId id, const oa::RoofSettings& r, bool plane = false);
+    void showPost(const oa::Post& p);
+    void showWallType(const oa::Wall& w, const oa::WallType& t);
     void showPlatform(const oa::FloorPlatform& f);
     void showRoom(const oa::Room& r);
     void showLoadBreakdown(oa::ObjectId id);

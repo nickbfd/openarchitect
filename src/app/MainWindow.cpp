@@ -60,11 +60,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ws_(new Workspace
 
     createActions();
     refreshLevels();
+    refreshWallTypes();
     updateTitle();
     updateUndoActions();
 
     connect(ws_, &Workspace::documentChanged, this, [this] {
         refreshLevels();
+        refreshWallTypes();
         updateUndoActions();
     });
     connect(ws_, &Workspace::currentLevelChanged, this, &MainWindow::refreshLevels);
@@ -120,7 +122,8 @@ void MainWindow::createActions() {
         {PlanView::Tool::Door, "Door", "D"},     {PlanView::Tool::Window, "Window", "N"},
         {PlanView::Tool::Beam, "Beam", "B"},     {PlanView::Tool::Floor, "Floor framing", "J"},
         {PlanView::Tool::Roof, "Roof", "R"},     {PlanView::Tool::RoofPlane, "Roof plane", "P"},
-        {PlanView::Tool::Room, "Room", "M"},
+        {PlanView::Tool::JoinPlanes, "Join roof planes", "K"}, {PlanView::Tool::Post, "Post", "O"},
+        {PlanView::Tool::RoomDivider, "Room divider", "M"},
     };
     for (const auto& def : defs) {
         QAction* a = tools->addAction(def.name);
@@ -139,6 +142,17 @@ void MainWindow::createActions() {
             if (t == tool) a->setChecked(true);
         });
     }
+    bar->addWidget(new QLabel(" Wall type "));
+    wallTypeBox_ = new QComboBox;
+    wallTypeBox_->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    wallTypeBox_->setToolTip("The wall type new walls get");
+    connect(wallTypeBox_, &QComboBox::activated, this, [this](int i) {
+        plan_->setWallType(wallTypeBox_->itemData(i).toULongLong());
+        tabs_->setCurrentWidget(plan_);
+        plan_->setTool(PlanView::Tool::Wall);
+        plan_->setFocus();
+    });
+    bar->addWidget(wallTypeBox_);
     tools->addSeparator();
     tools->addAction("Roof over this level's walls", this, &MainWindow::autoRoof);
     tools->addAction("Add level above", this, &MainWindow::addLevel);
@@ -151,6 +165,14 @@ void MainWindow::createActions() {
     showLoads->setShortcut(QKeySequence("L"));
     connect(showLoads, &QAction::toggled, plan_, &PlanView::setShowLoads);
     bar->addAction(showLoads);
+    QAction* showFraming = view->addAction("Show wall framing in 3D");
+    showFraming->setCheckable(true);
+    showFraming->setShortcut(QKeySequence("G"));
+    connect(showFraming, &QAction::toggled, this, [this](bool on) {
+        model_->setShowFraming(on);
+        if (on) tabs_->setCurrentWidget(model_);
+    });
+    bar->addAction(showFraming);
     view->addAction("Fit to window", QKeySequence("F"), this, [this] {
         if (tabs_->currentWidget() == plan_) plan_->zoomToFit();
         else model_->frameModel();
@@ -182,6 +204,18 @@ void MainWindow::refreshLevels() {
         levelBox_->insertItem(0, QString::fromStdString(l->name), QVariant::fromValue<qulonglong>(l->id));
     const int index = levelBox_->findData(QVariant::fromValue<qulonglong>(ws_->currentLevel()));
     levelBox_->setCurrentIndex(index);
+}
+
+void MainWindow::refreshWallTypes() {
+    const Document& d = ws_->doc();
+    if (!d.wallType(plan_->wallType())) {
+        const WallType* t = d.firstWallType(WallKind::Exterior);
+        plan_->setWallType(t ? t->id : kNoId);
+    }
+    wallTypeBox_->clear();
+    for (const auto& t : d.wallTypes)
+        if (!t.isDivider()) wallTypeBox_->addItem(QString::fromStdString(t.name), QVariant::fromValue<qulonglong>(t.id));
+    wallTypeBox_->setCurrentIndex(wallTypeBox_->findData(QVariant::fromValue<qulonglong>(plan_->wallType())));
 }
 
 void MainWindow::updateTitle() {
@@ -261,6 +295,7 @@ void MainWindow::openSizer(ObjectId id) {
     } else if (const Opening* o = doc.opening(id)) {
         loads = headerLoads(doc, result, id);
         title = QString("Header over %1 %2").arg(o->kind == OpeningKind::Door ? "door" : "window").arg(id);
+        assignable = true;
     } else if (doc.roof(id)) {
         const SupportLoads* s = result.ridgeBeam(id);
         if (!s) {
@@ -275,9 +310,16 @@ void MainWindow::openSizer(ObjectId id) {
     if (loads.span <= 0.0) return;
 
     BeamSizerDialog dialog(title, loads, criteriaFor(loads), assignable, this);
+    if (const Opening* o = doc.opening(id))
+        if (const Wall* w = doc.wall(o->wallId))
+            if (const WallType* t = doc.wallType(w->wallTypeId); t && !t->isDivider())
+                dialog.limitWidth(t->studDepth, "the wall's studs");
     if (dialog.exec() == QDialog::Accepted && assignable && !dialog.chosenMemberId().empty()) {
         const std::string member = dialog.chosenMemberId();
-        ws_->edit("Size beam", [id, member](Document& d) { d.beam(id)->memberId = member; });
+        if (ws_->doc().opening(id))
+            ws_->edit("Pick header", [id, member](Document& d) { d.opening(id)->headerMemberId = member; });
+        else
+            ws_->edit("Size beam", [id, member](Document& d) { d.beam(id)->memberId = member; });
     }
 }
 

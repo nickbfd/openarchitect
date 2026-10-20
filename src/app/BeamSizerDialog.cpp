@@ -172,7 +172,9 @@ BeamSizerDialog::BeamSizerDialog(const QString& title, BeamLoads loads, DesignCr
 void BeamSizerDialog::fillResults() {
     shown_.clear();
     for (const auto& c : checks_)
-        if (c.passes || showFailing_->isChecked()) shown_.push_back(&c);
+        if ((c.passes || showFailing_->isChecked()) &&
+            !(fitWidth_ && fitWidth_->isChecked() && c.member->b > maxWidth_ + 0.01))
+            shown_.push_back(&c);
 
     // Sorting must be off while rows are filled, or rows move mid-fill.
     results_->setSortingEnabled(false);
@@ -241,4 +243,16 @@ QString BeamSizerDialog::report() const {
     lines << "";
     lines << "Preliminary design per NDS (ASD); assumptions: dry service, normal temperature, CL = 1, simple span.";
     return lines.join('\n');
+}
+
+void BeamSizerDialog::limitWidth(double inches, const QString& what) {
+    maxWidth_ = inches;
+    fitWidth_ = new QCheckBox(QString("Only members that fit %1 (%2 wide or less)")
+                                  .arg(what, QString::fromStdString(formatFeetInches(inches, 16))),
+                              this);
+    fitWidth_->setChecked(true);
+    auto* box = qobject_cast<QVBoxLayout*>(layout());
+    box->insertWidget(box->indexOf(showFailing_) + 1, fitWidth_);
+    connect(fitWidth_, &QCheckBox::toggled, this, &BeamSizerDialog::fillResults);
+    fillResults();
 }

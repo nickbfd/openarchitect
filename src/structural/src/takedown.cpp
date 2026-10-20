@@ -291,7 +291,6 @@ private:
             }
             return hi > lo;
         };
-        bool uplift = false;
         // Plf on the eave and on the high side per unit of baseline length,
         // roof and ceiling apart.
         struct Strip {
@@ -311,13 +310,15 @@ private:
                 if (plane.hasCeiling) out.eaveCeiling = ceiling * (run / 12.0);
                 return out;
             }
-            double highDepth = (run * run - o * o) / (2.0 * run);
-            if (highDepth < 0.0) {
-                uplift = true;
-                highDepth = 0.0;
+            if (o >= run) {
+                // A short rafter, like a jack near a hip, whose overhang outweighs
+                // its span: it would lift its high end, so the eave takes it all.
+                out.eave = psf * ((run + o) / 12.0);
+                if (plane.hasCeiling) out.eaveCeiling = ceiling * (run / 12.0);
+                return out;
             }
             out.eave = psf * ((run + o) * (run + o) / (2.0 * run) / 12.0);
-            out.high = psf * (highDepth / 12.0);
+            out.high = psf * ((run * run - o * o) / (2.0 * run) / 12.0);
             if (plane.hasCeiling) out.eaveCeiling = out.highCeiling = ceiling * (run / 2.0 / 12.0);
             return out;
         };
@@ -412,9 +413,6 @@ private:
         if (highGaps > 1.5)
             warn(name + ": " + feetText(highGaps) + " of high side has no bearing wall or beam beneath it. If it leans "
                         "on another roof plane, set its high side to a ridge.");
-        if (uplift)
-            warn(name + ": the overhang is longer than the run in places, so the high side would lift up. "
-                        "Uplift is not modeled; that part of the high side gets no load.");
     }
 
     std::vector<size_t> roofTargets(const std::vector<size_t>& targets) {

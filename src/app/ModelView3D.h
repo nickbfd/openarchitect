@@ -24,6 +24,8 @@ public:
 
 public slots:
     void frameModel();
+    // Shows walls as studs, plates, headers and insulation.
+    void setShowFraming(bool on);
 
 protected:
     void initializeGL() override;
@@ -45,6 +47,7 @@ private:
     Mesh mesh_;
     bool meshDirty_ = true;
     bool framed_ = false;
+    bool showFraming_ = false;
 
     QOpenGLShaderProgram program_;
     QOpenGLBuffer vbo_{QOpenGLBuffer::VertexBuffer};

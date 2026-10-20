@@ -6,15 +6,21 @@ using namespace oa;
 
 namespace {
 
-ObjectId wall(Document& d, ObjectId level, Vec2 a, Vec2 b, bool bearing = true, double thickness = 5.5) {
+// Wall types from Document::createDefault, by name.
+ObjectId typeNamed(const Document& d, const char* name) {
+    for (const auto& t : d.wallTypes)
+        if (t.name == name) return t.id;
+    return kNoId;
+}
+
+ObjectId wall(Document& d, ObjectId level, Vec2 a, Vec2 b, ObjectId type, bool bearing = true) {
     Wall w;
     w.id = d.newId();
     w.levelId = level;
     w.a = a;
     w.b = b;
+    w.wallTypeId = type;
     w.bearing = bearing;
-    w.thickness = thickness;
-    if (!bearing) w.selfWeightPsf = 8.0;
     d.walls.push_back(w);
     return w.id;
 }
@@ -50,14 +56,19 @@ Document makeSampleHouse() {
     const ObjectId l1 = d.levels[0].id;
     const ObjectId l2 = d.levels[1].id;
     const double W = feet(40), D = feet(28), mid = D / 2;
+    const ObjectId exterior = typeNamed(d, "6\" exterior wall (2x6)");
+    const ObjectId interior = typeNamed(d, "4\" interior wall (2x4)");
+    const ObjectId divider = typeNamed(d, "Room divider (invisible)");
 
     // Floor 1
-    const ObjectId south1 = wall(d, l1, {0, 0}, {W, 0});
-    const ObjectId east1 = wall(d, l1, {W, 0}, {W, D});
-    const ObjectId north1 = wall(d, l1, {W, D}, {0, D});
-    const ObjectId west1 = wall(d, l1, {0, D}, {0, 0});
-    wall(d, l1, {0, mid}, {feet(24), mid}, true, 4.5);
-    wall(d, l1, {feet(16), mid}, {feet(16), D}, false, 4.5);
+    const ObjectId south1 = wall(d, l1, {0, 0}, {W, 0}, exterior);
+    const ObjectId east1 = wall(d, l1, {W, 0}, {W, D}, exterior);
+    const ObjectId north1 = wall(d, l1, {W, D}, {0, D}, exterior);
+    const ObjectId west1 = wall(d, l1, {0, D}, {0, 0}, exterior);
+    wall(d, l1, {0, mid}, {feet(24), mid}, interior);
+    wall(d, l1, {feet(16), mid}, {feet(16), D}, interior, false);
+    // The kitchen and dining room open onto the living room.
+    wall(d, l1, {feet(24), 0}, {feet(24), D}, divider, false);
 
     opening(d, south1, OpeningKind::Door, feet(8), 36, 80, 0);
     opening(d, south1, OpeningKind::Window, feet(20), 72, 48, 36);
@@ -80,31 +91,43 @@ Document makeSampleHouse() {
     room(d, l1, "Office", RoomType::Bedroom, {{0, mid}, {feet(16), D}});
     room(d, l1, "Dining", RoomType::Living, {{feet(16), mid}, {feet(24), D}});
 
-    // Front porch: a single roof plane from a beam on posts up to the south wall.
+    // Front porch: a single roof plane from a beam on two posts up to the
+    // south wall, with a foot of overhang past the beam and at each end.
     const double porch = feet(6);
     Beam porchBeam;
     porchBeam.id = d.newId();
     porchBeam.levelId = l1;
     porchBeam.a = {0, -porch};
     porchBeam.b = {feet(16), -porch};
+    porchBeam.memberId = "dfl-no2-1-4x10";
     d.beams.push_back(porchBeam);
+    for (Vec2 at : {porchBeam.a, porchBeam.b}) {
+        Post post;
+        post.id = d.newId();
+        post.levelId = l1;
+        post.position = at;
+        d.posts.push_back(post);
+    }
     RoofPlane porchRoof;
     porchRoof.id = d.newId();
     porchRoof.levelId = l1;
     porchRoof.a = porchBeam.a;
     porchRoof.b = porchBeam.b;
-    porchRoof.run = porch;
     porchRoof.pitch = 3.0;
-    porchRoof.overhang = 12.0;
+    porchRoof.outline = RoofPlane::rectangle(porchBeam.a - Vec2{12, 0}, porchBeam.b + Vec2{12, 0}, porch, 12.0);
     d.roofPlanes.push_back(porchRoof);
+    // Room dividers close the porch off so it is a room of its own.
+    wall(d, l1, {0, 0}, {0, -porch}, divider, false);
+    wall(d, l1, {0, -porch}, {feet(16), -porch}, divider, false);
+    wall(d, l1, {feet(16), -porch}, {feet(16), 0}, divider, false);
     room(d, l1, "Porch", RoomType::Deck, {{0, -porch}, {feet(16), 0}});
 
     // Floor 2
-    const ObjectId south2 = wall(d, l2, {0, 0}, {W, 0});
-    const ObjectId east2 = wall(d, l2, {W, 0}, {W, D});
-    const ObjectId north2 = wall(d, l2, {W, D}, {0, D});
-    wall(d, l2, {0, D}, {0, 0});
-    wall(d, l2, {feet(20), 0}, {feet(20), D}, false, 4.5);
+    const ObjectId south2 = wall(d, l2, {0, 0}, {W, 0}, exterior);
+    const ObjectId east2 = wall(d, l2, {W, 0}, {W, D}, exterior);
+    const ObjectId north2 = wall(d, l2, {W, D}, {0, D}, exterior);
+    wall(d, l2, {0, D}, {0, 0}, exterior);
+    wall(d, l2, {feet(20), 0}, {feet(20), D}, interior, false);
 
     opening(d, south2, OpeningKind::Window, feet(8), 48, 48, 36);
     opening(d, south2, OpeningKind::Window, feet(32), 48, 48, 36);
@@ -132,5 +155,7 @@ Document makeSampleHouse() {
     roof.pitch = 6.0;
     roof.overhang = 18.0;
     d.roofs.push_back(roof);
+    // Walls take their types' sizes, and the rooms above are matched to the walls.
+    d.refresh();
     return d;
 }

@@ -4,6 +4,7 @@
 
 #include "oa/core/units.h"
 #include "oa/structural/members.h"
+#include "oa/structural/posts.h"
 #include "oa/structural/snow.h"
 
 #include <QCheckBox>
@@ -31,6 +32,26 @@ QString compass(Vec2 v) {
     double deg = std::atan2(v.y, v.x) * 180.0 / kPi;
     if (deg < 0) deg += 360.0;
     return names[static_cast<int>(std::lround(deg / 45.0)) % 8];
+}
+
+// Moves the outline edges that run parallel to the baseline at its low
+// side (the eaves) or high side so they sit `target` inches downhill or
+// uphill from the baseline.
+Polygon setParallelEdges(const RoofPlane& p, bool high, double target) {
+    Polygon out = p.outline;
+    const int n = static_cast<int>(out.size());
+    const double extreme = high ? p.runLength() : -p.eaveOverhang();
+    for (int i = 0; i < n; ++i) {
+        const Vec2 a = out[i], b = out[(i + 1) % n];
+        if (std::abs(cross((b - a).normalized(), p.along())) > 1e-3) continue;
+        const double s = p.upFrom(a);
+        if (std::abs(s - extreme) > 0.5) continue;
+        const double wanted = high ? target : -target;
+        const double sign = dot((b - a).normalized().perp(), p.upslope());
+        Polygon moved = moveEdge(out, i, sign * (wanted - s));
+        if (moved.size() == out.size()) out = std::move(moved);
+    }
+    return out;
 }
 } // namespace
 
@@ -76,6 +97,7 @@ void PropertiesPanel::rebuild() {
     if (const Wall* w = d.wall(id)) showWall(*w);
     else if (const Opening* o = d.opening(id)) showOpening(*o);
     else if (const Beam* b = d.beam(id)) showBeam(*b);
+    else if (const Post* p = d.post(id)) showPost(*p);
     else if (const Roof* r = d.roof(id)) showRoof(*r);
     else if (const RoofPlane* p = d.roofPlane(id)) showRoofPlane(*p);
     else if (const FloorPlatform* f = Document::findIn(d.platforms, id)) showPlatform(*f);
@@ -255,16 +277,148 @@ void PropertiesPanel::showPlan() {
 
 void PropertiesPanel::showWall(const Wall& w) {
     const ObjectId id = w.id;
-    heading(QString("Wall %1").arg(id));
+    const Document& doc = ws_->doc();
+    heading(ws_->describe(id));
     length("Length", w.length(), [id](Document& d, double v) {
         Wall* x = d.wall(id);
         x->b = x->a + (x->b - x->a).normalized() * v;
     }, 1.0);
-    length("Thickness", w.thickness, [id](Document& d, double v) { d.wall(id)->thickness = v; }, 1.0);
+
+    // Wall type: a named build-up, or "set by hand".
+    QStringList types{"Custom (set by hand)"};
+    std::vector<ObjectId> typeIds{kNoId};
+    int current = 0;
+    for (const auto& t : doc.wallTypes) {
+        if (t.id == w.wallTypeId) current = static_cast<int>(types.size());
+        types << QString::fromStdString(t.name);
+        typeIds.push_back(t.id);
+    }
+    choice("Wall type", types, current, [id, typeIds](Document& d, int v) {
+        Wall* x = d.wall(id);
+        const bool wasDivider = x->roomDivider;
+        x->wallTypeId = typeIds[v];
+        const WallType* t = d.wallType(x->wallTypeId);
+        x->roomDivider = t && t->isDivider();
+        if (wasDivider && !x->roomDivider) {
+            x->bearing = !t || t->kind == WallKind::Exterior;
+            if (!t) x->thickness = 5.5;
+        }
+    });
+    if (w.roomDivider) {
+        note("<span style='color:#666'>A room divider is an invisible wall: it only separates rooms. It carries "
+             "no load, isn't drawn in 3D and can't take doors or windows.</span>");
+        return;
+    }
+    const WallType* type = doc.wallType(w.wallTypeId);
+    if (type) {
+        info("Thickness", feetInches(w.thickness));
+        info("Self weight", QString("%1 psf").arg(w.selfWeightPsf, 0, 'f', 1));
+    } else {
+        length("Thickness", w.thickness, [id](Document& d, double v) { d.wall(id)->thickness = v; }, 1.0);
+        number("Self weight", w.selfWeightPsf, 0, 200, 1, " psf", [id](Document& d, double v) { d.wall(id)->selfWeightPsf = v; });
+    }
     length("Height (0 = level)", w.height, [id](Document& d, double v) { d.wall(id)->height = v; });
     check("Bearing", w.bearing, [id](Document& d, bool v) { d.wall(id)->bearing = v; });
-    number("Self weight", w.selfWeightPsf, 0, 200, 1, " psf", [id](Document& d, double v) { d.wall(id)->selfWeightPsf = v; });
+    if (type) showWallType(w, *type);
     if (w.bearing) showLoadBreakdown(id);
+}
+
+// The wall type's framing and layers. Changing them changes every wall of the type.
+void PropertiesPanel::showWallType(const Wall& w, const WallType& t) {
+    const ObjectId typeId = t.id;
+    const ObjectId wallId = w.id;
+    int count = 0;
+    for (const auto& x : ws_->doc().walls)
+        if (x.wallTypeId == typeId) ++count;
+    heading("Wall type framing");
+    text("Type name", QString::fromStdString(t.name), [typeId](Document& d, const std::string& v) { d.wallType(typeId)->name = v; });
+    choice("Kind", {"Exterior", "Interior"}, t.kind == WallKind::Interior ? 1 : 0,
+           [typeId](Document& d, int v) { d.wallType(typeId)->kind = v == 1 ? WallKind::Interior : WallKind::Exterior; });
+    const double depths[] = {3.5, 5.5, 7.25};
+    int depthIndex = 0;
+    for (int i = 0; i < 3; ++i)
+        if (std::abs(t.studDepth - depths[i]) < 0.01) depthIndex = i;
+    choice("Studs", {"2x4", "2x6", "2x8"}, depthIndex, [typeId, depths](Document& d, int v) { d.wallType(typeId)->studDepth = depths[v]; });
+    const double spacings[] = {12.0, 16.0, 19.2, 24.0};
+    int spacingIndex = 1;
+    for (int i = 0; i < 4; ++i)
+        if (std::abs(t.studSpacing - spacings[i]) < 0.01) spacingIndex = i;
+    choice("Stud spacing", {"12\" o.c.", "16\" o.c.", "19.2\" o.c.", "24\" o.c."}, spacingIndex,
+           [typeId, spacings](Document& d, int v) { d.wallType(typeId)->studSpacing = spacings[v]; });
+    check("Insulated", t.insulated, [typeId](Document& d, bool v) { d.wallType(typeId)->insulated = v; });
+    if (t.insulated)
+        text("Insulation", QString::fromStdString(t.insulation),
+             [typeId](Document& d, const std::string& v) { d.wallType(typeId)->insulation = v; });
+    length("Drywall", t.interiorFinish, [typeId](Document& d, double v) { d.wallType(typeId)->interiorFinish = v; });
+    if (t.kind == WallKind::Exterior) {
+        length("Sheathing", t.sheathing, [typeId](Document& d, double v) { d.wallType(typeId)->sheathing = v; });
+        length("Siding", t.siding, [typeId](Document& d, double v) { d.wallType(typeId)->siding = v; });
+    }
+    note(QString("<span style='color:#666'>Changes here apply to all %1 wall%2 of this type.</span>")
+             .arg(count)
+             .arg(count == 1 ? "" : "s"));
+    button("Make a new type from this one", [this, typeId, wallId] {
+        apply("Add wall type", [typeId, wallId](Document& d) {
+            WallType copy = *d.wallType(typeId);
+            copy.id = d.newId();
+            copy.name += " (copy)";
+            d.wallTypes.push_back(copy);
+            d.wall(wallId)->wallTypeId = copy.id;
+        });
+    });
+}
+
+void PropertiesPanel::showPost(const Post& p) {
+    const ObjectId id = p.id;
+    const Document& doc = ws_->doc();
+    heading(QString("Post %1").arg(id));
+    QStringList sizes;
+    int current = 0;
+    std::vector<std::string> ids;
+    for (const auto& m : postCatalog()) {
+        if (m.id == p.memberId) current = static_cast<int>(ids.size());
+        sizes << QString::fromStdString(m.name);
+        ids.push_back(m.id);
+    }
+    choice("Size", sizes, current, [id, ids](Document& d, int v) { d.post(id)->memberId = ids[v]; });
+    length("Height (0 = level)", p.height, [id](Document& d, double v) { d.post(id)->height = v; });
+
+    heading("Load");
+    const PostLoads* load = ws_->loads().post(id);
+    if (!load || load->load.isZero()) {
+        note("<span style='color:#666'>Nothing bears on this post yet. Put a beam end over it.</span>");
+        return;
+    }
+    QString cases;
+    for (LoadCase c : kAllCases)
+        if (load->load[c] > 0.5) cases += QString("%1 %2 lb, ").arg(shortName(c)).arg(load->load[c], 0, 'f', 0);
+    cases.chop(2);
+    info("Carries", cases);
+    for (const auto& s : load->sources) info("From", QString::fromStdString(s));
+    const double height = doc.postHeight(p);
+    if (const PostMember* m = findPost(p.memberId)) {
+        const PostCheck check = checkPost(*m, load->load, height);
+        info("Check", QString("%1 lb of %2 lb allowed (%3%), %4")
+                          .arg(check.demand, 0, 'f', 0)
+                          .arg(check.capacity, 0, 'f', 0)
+                          .arg(check.ratio * 100, 0, 'f', 0)
+                          .arg(QString::fromStdString(check.combo)));
+        note(check.passes ? "<span style='color:#2a7d2a'><b>OK</b> for this load.</span>"
+                          : "<span style='color:#c0392b'><b>Too small</b> for this load.</span>");
+    }
+    if (const PostMember* r = recommendPost(load->load, height)) {
+        info("Smallest that works", QString::fromStdString(r->name));
+        if (r->id != p.memberId) {
+            const std::string rid = r->id;
+            button("Use " + QString::fromStdString(r->name), [this, id, rid] {
+                apply("Size post", [id, rid](Document& d) { d.post(id)->memberId = rid; });
+            });
+        }
+    } else {
+        note("<span style='color:#c0392b'>No post in the catalog carries this load at this height.</span>");
+    }
+    note("<span style='color:#666'>NDS column check, pinned ends, unbraced full height, Douglas Fir-Larch. "
+         "Check the footing under it separately.</span>");
 }
 
 void PropertiesPanel::showOpening(const Opening& o) {
@@ -275,9 +429,22 @@ void PropertiesPanel::showOpening(const Opening& o) {
     length("Width", o.width, [id](Document& d, double v) { d.opening(id)->width = v; }, 1.0);
     length("Height", o.height, [id](Document& d, double v) { d.opening(id)->height = v; }, 1.0);
     length("Sill height", o.sillHeight, [id](Document& d, double v) { d.opening(id)->sillHeight = v; });
+    // Top height moves the top and keeps the sill, the way windows are set to line up with door heads.
+    length("Top height", o.topHeight(), [id](Document& d, double v) {
+        Opening* x = d.opening(id);
+        x->height = std::max(1.0, v - x->sillHeight);
+    }, 1.0);
     length("Center from wall start", o.offset, [id](Document& d, double v) { d.opening(id)->offset = v; });
+
+    heading("Header");
+    const Member* m = findMember(o.headerMemberId);
+    info("Header", m ? QString::fromStdString(m->name) : QString("Not picked yet"));
     if (const Wall* w = ws_->doc().wall(o.wallId); w && w->bearing)
         button("Size header…", [this, id] { emit sizeRequested(id); });
+    else
+        note("<span style='color:#666'>The wall isn't bearing, so the header carries only the wall above.</span>");
+    if (m)
+        button("Clear header", [this, id] { apply("Clear header", [id](Document& d) { d.opening(id)->headerMemberId.clear(); }); });
 }
 
 void PropertiesPanel::showBeam(const Beam& b) {
@@ -316,29 +483,46 @@ void PropertiesPanel::showRoofPlane(const RoofPlane& p) {
     const ObjectId id = p.id;
     heading(QString("Roof plane %1").arg(id));
     info("Slopes down toward", "the " + compass(p.upslope() * -1.0));
-    info("Eave length", feetInches(p.eaveLength()));
-    length("Run (eave to high side)", p.run, [id](Document& d, double v) { d.roofPlane(id)->run = v; }, 12.0);
+    info("Bearing line", feetInches(distance(p.a, p.b)));
+    info("Width", feetInches(p.width()));
+    choice("High side", {"Bears on a wall or beam (shed)", "Leans on other planes at a ridge"}, p.highBearing ? 0 : 1,
+           [id](Document& d, int v) { d.roofPlane(id)->highBearing = v == 0; });
+    length("Run (bearing line to high side)", p.runLength(), [id](Document& d, double v) {
+        RoofPlane* x = d.roofPlane(id);
+        x->outline = setParallelEdges(*x, true, v);
+    }, 12.0);
+    length("Eave overhang", p.eaveOverhang(), [id](Document& d, double v) {
+        RoofPlane* x = d.roofPlane(id);
+        x->outline = setParallelEdges(*x, false, v);
+    });
     button("Flip the slope", [this, id] {
         apply("Flip roof plane", [id](Document& d) {
             RoofPlane* x = d.roofPlane(id);
-            const Segment high = x->highLine();
-            x->a = high.b;
-            x->b = high.a;
+            // The bearing line moves to the old high side, reversed so the plane rises the other way.
+            const Vec2 up = x->upslope() * x->runLength();
+            const Vec2 a = x->b + up, b = x->a + up;
+            x->a = a;
+            x->b = b;
         });
     });
-    showRoofSettings(id, p);
-    note("<span style='color:#666'>The eave side and the high side each need a bearing wall or beam "
-         "beneath them on this level.</span>");
+    showRoofSettings(id, p, true);
+    note(p.highBearing
+             ? "<span style='color:#666'>Drag the corner and edge handles on the plan to reshape it. Use Join roof "
+               "planes to trim an edge to a hip or valley. The bearing line and the high side each need a wall or "
+               "beam beneath them.</span>"
+             : "<span style='color:#666'>Drag the corner and edge handles on the plan to reshape it. Use Join roof "
+               "planes to trim an edge to a hip or valley. With a ridge board, the bearing line carries the whole "
+               "plane.</span>");
 }
 
 // Framing, slope and loads shared by roofs and roof planes.
-void PropertiesPanel::showRoofSettings(ObjectId id, const RoofSettings& r) {
+void PropertiesPanel::showRoofSettings(ObjectId id, const RoofSettings& r, bool plane) {
     const Site& site = ws_->doc().site;
     const bool trusses = r.framing == RoofFraming::Trusses;
     choice("Structure", {"Rafters (stick framed)", "Manufactured trusses"}, trusses ? 1 : 0,
            [id](Document& d, int v) { d.roofSettings(id)->framing = v == 0 ? RoofFraming::Rafters : RoofFraming::Trusses; });
     number("Pitch", r.pitch, 0.25, 24, 2, " in 12", [id](Document& d, double v) { d.roofSettings(id)->pitch = v; });
-    length("Overhang", r.overhang, [id](Document& d, double v) { d.roofSettings(id)->overhang = v; });
+    if (!plane) length("Overhang", r.overhang, [id](Document& d, double v) { d.roofSettings(id)->overhang = v; });
 
     heading("Roof loads");
     number("Dead load", r.deadPsf, 0, 100, 1, " psf", [id](Document& d, double v) { d.roofSettings(id)->deadPsf = v; });
@@ -388,6 +572,8 @@ void PropertiesPanel::showPlatform(const FloorPlatform& f) {
 void PropertiesPanel::showRoom(const Room& r) {
     const ObjectId id = r.id;
     heading("Room");
+    note("<span style='color:#666'>Rooms fill the areas walls enclose. Use the Room divider tool to split an open "
+         "area into rooms.</span>");
     text("Name", QString::fromStdString(r.name), [id](Document& d, const std::string& v) { d.room(id)->name = v; });
     QStringList types;
     for (int t = 0; t <= static_cast<int>(RoomType::Other); ++t)

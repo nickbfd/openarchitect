@@ -61,6 +61,12 @@ ModelView3D::~ModelView3D() {
     doneCurrent();
 }
 
+void ModelView3D::setShowFraming(bool on) {
+    showFraming_ = on;
+    meshDirty_ = true;
+    update();
+}
+
 void ModelView3D::initializeGL() {
     initializeOpenGLFunctions();
     glEnable(GL_DEPTH_TEST);
@@ -76,7 +82,7 @@ void ModelView3D::initializeGL() {
 }
 
 void ModelView3D::rebuild() {
-    mesh_ = buildMesh(ws_->doc(), ws_->selection());
+    mesh_ = buildMesh(ws_->doc(), ws_->selection(), showFraming_);
     vertexCount_ = static_cast<int>(mesh_.vertices.size());
 
     QOpenGLVertexArrayObject::Binder bind(&vao_);
