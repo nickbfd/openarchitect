@@ -3,11 +3,15 @@
 #include "oa/core/document.h"
 
 #include <QPointF>
+#include <QRectF>
 #include <QWidget>
+
+#include <functional>
 
 #include <optional>
 #include <vector>
 
+class QLineEdit;
 class Workspace;
 
 // The 2D plan editor. World coordinates are inches with y pointing up
@@ -39,6 +43,8 @@ public slots:
 signals:
     void statusMessage(const QString& text);
     void toolChanged(PlanView::Tool tool);
+    // Double-click on an object: show its properties, like Chief's Open Object.
+    void openObjectRequested();
 
 protected:
     bool event(QEvent* e) override;
@@ -87,12 +93,33 @@ private:
     void drawRoofPlanes(QPainter& g) const;
     void drawPosts(QPainter& g) const;
     void drawDimensions(QPainter& g) const;
-    void drawDimension(QPainter& g, oa::Vec2 a, oa::Vec2 b, double offset, bool selected) const;
+    // Returns where the dimension's text is on screen.
+    QRectF drawDimension(QPainter& g, oa::Vec2 a, oa::Vec2 b, double offset, bool selected, bool temporary = false) const;
+    // Dimensions shown only while one wall or opening is selected: to the
+    // nearest parallel walls, or to the ends of the opening's wall.
+    void drawTemporaryDimensions(QPainter& g) const;
     void drawTerrain(QPainter& g) const;
     void drawTyped(QPainter& g) const;
     void drawLoads(QPainter& g) const;
     void drawToolPreview(QPainter& g) const;
-    void drawLengthLabel(QPainter& g, oa::Vec2 a, oa::Vec2 b) const;
+    QRectF drawLengthLabel(QPainter& g, oa::Vec2 a, oa::Vec2 b) const;
+
+    // Numbers on the plan that take a typed value, the way Chief lets you
+    // click a dimension and type to move what's selected. Rebuilt on every paint.
+    struct ValueHit {
+        QRectF rect;
+        double value;
+        QString undoText;
+        std::function<void(oa::Document&, double)> apply;
+    };
+    void addValueHit(QRectF rect, double value, const QString& undoText,
+                     std::function<void(oa::Document&, double)> apply) const;
+    void openValueEditor(const ValueHit& hit);
+    void commitValue();
+    // Arrow keys: moves the selection by `delta`.
+    void nudge(oa::Vec2 delta);
+    // Tab while drawing a wall or beam: type its length and angle.
+    void askLengthAngle();
 
     // Shift box selection: the objects entirely inside a box, limited to
     // the kind the current tool draws (everything with Select).
@@ -162,5 +189,9 @@ private:
     std::vector<oa::ObjectId> stack_;
     bool cycleOnRelease_ = false;
     QString stackHint_;
+    mutable std::vector<ValueHit> valueHits_;
+    QLineEdit* valueEdit_ = nullptr;
+    std::optional<ValueHit> editing_;
+
     const oa::Document& doc() const;
 };

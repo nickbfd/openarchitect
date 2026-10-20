@@ -14,6 +14,11 @@ namespace oa {
 // dimensions come back without ids, marked automatic.
 std::vector<Dimension> exteriorDimensions(const Document& doc, ObjectId levelId);
 
+// Redoes the automatic exterior dimensions on every level that has them,
+// keeping their ids where it can. Document::refresh calls it after each
+// edit when the plan's autoRefreshDimensions is on.
+void refreshAutomaticDimensions(Document& doc);
+
 // Changes where dimensions to walls land, and redoes the automatic
 // exterior dimensions on every level that has them.
 void setDimensionTo(Document& doc, DimensionTo to);

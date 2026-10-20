@@ -3,6 +3,7 @@
 #include "Workspace.h"
 
 #include "oa/core/dimensions.h"
+#include "oa/core/editing.h"
 #include "oa/core/units.h"
 #include "oa/structural/members.h"
 #include "oa/structural/posts.h"
@@ -496,10 +497,15 @@ void PropertiesPanel::showWall(const Wall& w) {
     const ObjectId id = w.id;
     const Document& doc = ws_->doc();
     heading(ws_->describe(id));
-    length("Length", w.length(), [id](Document& d, double v) {
-        Wall* x = d.wall(id);
-        x->b = x->a + (x->b - x->a).normalized() * v;
-    }, 1.0);
+    Workspace* ws = ws_;
+    length("Length", w.length(), [id, ws](Document& d, double v) { setWallLength(d, id, v, ws->wallLengthAnchor()); }, 1.0);
+    // Which end a new length moves; walls joined there stretch to follow.
+    auto* moves = new QComboBox;
+    moves->addItems({"The end", "The start", "Both ends"});
+    moves->setCurrentIndex(ws_->wallLengthAnchor());
+    moves->setToolTip("Which end of the wall moves when you type a new length here or on the plan");
+    connect(moves, &QComboBox::activated, this, [ws](int v) { ws->setWallLengthAnchor(v); });
+    form_->addRow("Length change moves", moves);
 
     // Wall type: a named build-up, or "set by hand".
     QStringList types{"Custom (set by hand)"};

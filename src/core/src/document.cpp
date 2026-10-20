@@ -1,5 +1,6 @@
 #include "oa/core/document.h"
 
+#include "oa/core/dimensions.h"
 #include "oa/core/rooms.h"
 #include "oa/core/units.h"
 
@@ -224,6 +225,7 @@ bool Document::remove(ObjectId id) {
 void Document::refresh() {
     upgrade();
     updateRooms(*this);
+    if (autoRefreshDimensions) refreshAutomaticDimensions(*this);
 }
 
 void Document::upgrade() {

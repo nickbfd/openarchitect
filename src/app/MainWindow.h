@@ -7,6 +7,7 @@
 #include <QMainWindow>
 
 class QAction;
+class QDockWidget;
 class QComboBox;
 class QMenu;
 class QTabWidget;
@@ -37,6 +38,9 @@ private:
     bool saveAs();
     void openSizer(oa::ObjectId id);
     void addLevel();
+    void buildNewFloor();
+    // Shows the selected object's properties, ready to type in (Chief's Open Object).
+    void openObject();
     void autoRoof();
 
     Workspace* ws_;
@@ -47,6 +51,8 @@ private:
     QMenu* wallMenu_ = nullptr;
     QAction* dimEdge_ = nullptr;
     QAction* dimCenter_ = nullptr;
+    QAction* dimAuto_ = nullptr;
+    QDockWidget* propsDock_ = nullptr;
     QAction* undoAction_ = nullptr;
     QAction* redoAction_ = nullptr;
 };

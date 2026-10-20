@@ -48,6 +48,12 @@ public:
     void select(oa::ObjectId id);
     void selectMany(std::vector<oa::ObjectId> ids);
 
+    // Which end moves when a wall's length is typed: 0 the end, 1 the
+    // start, 2 both (the middle stays put). A session setting, like Chief's
+    // prompt for which end of a wall to move.
+    int wallLengthAnchor() const { return wallLengthAnchor_; }
+    void setWallLengthAnchor(int anchor) { wallLengthAnchor_ = anchor; }
+
     // A short name people read, like "Wall 12" or "Window 7".
     QString describe(oa::ObjectId id) const;
 
@@ -69,5 +75,6 @@ private:
     QString filePath_;
     oa::ObjectId currentLevel_ = oa::kNoId;
     std::vector<oa::ObjectId> selection_;
+    int wallLengthAnchor_ = 0;
     mutable std::optional<oa::structural::TakedownResult> loads_;
 };

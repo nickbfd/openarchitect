@@ -274,6 +274,7 @@ struct Document {
     std::vector<Post> posts;
     std::vector<Dimension> dimensions;
     DimensionTo dimensionTo = DimensionTo::FramingEdge;
+    bool autoRefreshDimensions = true; // automatic exterior dimensions follow wall edits
     Terrain terrain;
     ObjectId nextId = 1;
 

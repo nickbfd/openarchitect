@@ -64,7 +64,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Beam, id, levelId, a, b, memberI
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Site, groundSnowPsf, exposureCe, thermalCt, importanceIs)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Document, name, site, levels, wallTypes, walls, openings,
                                                 rooms, platforms, roofs, roofPlanes, beams, posts,
-                                                dimensions, dimensionTo, terrain, nextId)
+                                                dimensions, dimensionTo, autoRefreshDimensions, terrain, nextId)
 
 namespace {
 
