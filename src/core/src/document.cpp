@@ -152,10 +152,24 @@ ObjectId Document::levelOf(ObjectId id) const {
     if (const Roof* r = roof(id)) return r->levelId;
     if (const RoofPlane* p = roofPlane(id)) return p->levelId;
     if (const Post* p = post(id)) return p->levelId;
+    if (const Dimension* d = dimension(id)) return d->levelId;
+    if (elevationPoint(id)) {
+        const Level* g = groundLevel();
+        return g ? g->id : kNoId;
+    }
     if (const FloorPlatform* f = findIn(platforms, id)) return f->levelId;
     if (const Room* r = findIn(rooms, id)) return r->levelId;
     if (level(id)) return id;
     return kNoId;
+}
+
+const Level* Document::groundLevel() const {
+    const auto sorted = levelsByElevation();
+    return sorted.empty() ? nullptr : sorted.front();
+}
+
+double Document::roomLivePsf(const Room& r) const {
+    return r.floor.livePsf > 0.0 ? r.floor.livePsf : defaultLiveLoadPsf(r.type);
 }
 
 bool Document::contains(ObjectId id) const { return id != kNoId && levelOf(id) != kNoId; }
@@ -199,10 +213,12 @@ bool Document::remove(ObjectId id) {
         std::erase_if(roofPlanes, onLevel);
         std::erase_if(beams, onLevel);
         std::erase_if(posts, onLevel);
+        std::erase_if(dimensions, onLevel);
         return true;
     }
     return eraseId(openings) || eraseId(rooms) || eraseId(platforms) || eraseId(roofs) ||
-           eraseId(roofPlanes) || eraseId(beams) || eraseId(posts) || eraseWallType(id);
+           eraseId(roofPlanes) || eraseId(beams) || eraseId(posts) || eraseId(dimensions) ||
+           eraseId(terrain.points) || eraseWallType(id);
 }
 
 void Document::refresh() {

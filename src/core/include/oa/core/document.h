@@ -86,12 +86,55 @@ struct Opening {
     double topHeight() const { return sillHeight + height; }
 };
 
+// What a room's floor is built from. Most rooms sit on the level's floor
+// framing; a room can have its own joists (a flush shower framed with
+// deeper or closer joists), or a concrete slab (a garage or patio).
+enum class FloorSystemKind { LevelFraming, Joists, Slab };
+
+struct RoomFloor {
+    FloorSystemKind kind = FloorSystemKind::LevelFraming;
+    std::string joists = "2x10 @ 16\" o.c."; // description of the joists, for Joists
+    bool customJoistAxis = false;          // false: joists run the way the level's framing does
+    Axis joistAxis = Axis::Y;
+    double deadPsf = 10.0;                 // joists, subfloor and finish
+    double livePsf = 0.0;                  // 0: the room type's IRC live load
+    double slabThickness = 4.0;            // inches, for Slab
+    std::string slabNote = "3000 psi concrete on 4\" compacted gravel";
+    double drop = 0.0;                     // how far the floor surface sits below the level's floor, inches
+};
+
 struct Room {
     ObjectId id = kNoId;
     ObjectId levelId = kNoId;
     std::string name;
     RoomType type = RoomType::Living;
     Polygon outline;
+    RoomFloor floor;
+};
+
+// A dimension line on the plan from `a` to `b`, drawn `offset` inches to
+// the left of a to b (negative: to the right).
+struct Dimension {
+    ObjectId id = kNoId;
+    ObjectId levelId = kNoId;
+    Vec2 a, b;
+    double offset = 24.0;
+    bool automatic = false; // made by "Dimension exterior walls", replaced when that runs again
+
+    double length() const { return distance(a, b); }
+};
+
+// A spot elevation on the site, relative to the first floor (0 = the
+// lowest level's floor). The terrain surface runs between these points.
+struct ElevationPoint {
+    ObjectId id = kNoId;
+    Vec2 position;
+    double elevation = -12.0;
+};
+
+struct Terrain {
+    std::vector<ElevationPoint> points;
+    double contourInterval = 12.0; // inches between contour lines
 };
 
 // The floor structure of a level, bearing on walls and beams of the level
@@ -225,6 +268,8 @@ struct Document {
     std::vector<RoofPlane> roofPlanes;
     std::vector<Beam> beams;
     std::vector<Post> posts;
+    std::vector<Dimension> dimensions;
+    Terrain terrain;
     ObjectId nextId = 1;
 
     ObjectId newId() { return nextId++; }
@@ -258,6 +303,14 @@ struct Document {
     const RoofSettings* roofSettings(ObjectId id) const;
     WallType* wallType(ObjectId id) { return findIn(wallTypes, id); }
     const WallType* wallType(ObjectId id) const { return findIn(wallTypes, id); }
+    Dimension* dimension(ObjectId id) { return findIn(dimensions, id); }
+    const Dimension* dimension(ObjectId id) const { return findIn(dimensions, id); }
+    ElevationPoint* elevationPoint(ObjectId id) { return findIn(terrain.points, id); }
+    const ElevationPoint* elevationPoint(ObjectId id) const { return findIn(terrain.points, id); }
+    // The lowest level, where the terrain is drawn and edited.
+    const Level* groundLevel() const;
+    // Live load on a room's floor: its own, or its type's IRC value.
+    double roomLivePsf(const Room& r) const;
     Post* post(ObjectId id) { return findIn(posts, id); }
     const Post* post(ObjectId id) const { return findIn(posts, id); }
     // The first wall type of a kind, or nullptr.

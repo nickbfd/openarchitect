@@ -3,6 +3,8 @@ add_library(oa_core
     src/geometry.cpp
     src/document.cpp
     src/rooms.cpp
+    src/terrain.cpp
+    src/dimensions.cpp
     src/undo.cpp
     src/serialization.cpp
 )

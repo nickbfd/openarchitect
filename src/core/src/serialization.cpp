@@ -25,6 +25,9 @@ NLOHMANN_JSON_SERIALIZE_ENUM(RoofFraming, {{RoofFraming::Rafters, "rafters"}, {R
 NLOHMANN_JSON_SERIALIZE_ENUM(WallKind, {{WallKind::Exterior, "exterior"}, {WallKind::Interior, "interior"},
                                        {WallKind::RoomDivider, "roomDivider"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(Axis, {{Axis::X, "x"}, {Axis::Y, "y"}})
+NLOHMANN_JSON_SERIALIZE_ENUM(FloorSystemKind, {{FloorSystemKind::LevelFraming, "levelFraming"},
+                                               {FloorSystemKind::Joists, "joists"},
+                                               {FloorSystemKind::Slab, "slab"}})
 
 // Points are written as [x, y] to keep files compact and readable.
 void to_json(json& j, const Vec2& v) { j = json::array({v.x, v.y}); }
@@ -41,7 +44,12 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Wall, id, levelId, a, b, wallTyp
                                                 bearing, selfWeightPsf, roomDivider)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Opening, id, wallId, kind, offset, width, height,
                                                 sillHeight, headerMemberId)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Room, id, levelId, name, type, outline)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoomFloor, kind, joists, customJoistAxis, joistAxis, deadPsf,
+                                                livePsf, slabThickness, slabNote, drop)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Room, id, levelId, name, type, outline, floor)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Dimension, id, levelId, a, b, offset, automatic)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ElevationPoint, id, position, elevation)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Terrain, points, contourInterval)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FloorPlatform, id, levelId, area, joistAxis, deadPsf,
                                                 livePsf)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Roof, id, levelId, style, footprint, ridgeAxis, pitch,
@@ -54,7 +62,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Post, id, levelId, position, mem
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Beam, id, levelId, a, b, memberId)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Site, groundSnowPsf, exposureCe, thermalCt, importanceIs)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Document, name, site, levels, wallTypes, walls, openings,
-                                                rooms, platforms, roofs, roofPlanes, beams, posts, nextId)
+                                                rooms, platforms, roofs, roofPlanes, beams, posts,
+                                                dimensions, terrain, nextId)
 
 namespace {
 
@@ -104,7 +113,7 @@ Document documentFromJson(const std::string& text) {
         };
         scan(doc.levels); scan(doc.walls); scan(doc.openings); scan(doc.rooms);
         scan(doc.platforms); scan(doc.roofs); scan(doc.roofPlanes); scan(doc.beams);
-        scan(doc.wallTypes); scan(doc.posts);
+        scan(doc.wallTypes); scan(doc.posts); scan(doc.dimensions); scan(doc.terrain.points);
         doc.nextId = std::max(doc.nextId, maxId + 1);
         doc.upgrade();
         return doc;
