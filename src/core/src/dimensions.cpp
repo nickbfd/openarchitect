@@ -73,13 +73,30 @@ std::vector<Dimension> exteriorDimensions(const Document& doc, ObjectId levelId)
         nearest.insert(nearest.end(), openings.begin(), openings.end());
         nearest = unique(nearest);
 
+        // Strings go past anything else on the level that sticks out on this
+        // side, like a porch beam and its posts.
+        double clear = outside;
+        auto pushOut = [&](Vec2 p, double halfWidth) {
+            const double s = at(p);
+            if (s >= corners.front() - 24.0 && s <= corners.back() + 24.0)
+                clear = std::max(clear, across(p) + halfWidth);
+        };
+        for (const auto& w : doc.walls)
+            if (w.levelId == levelId)
+                for (Vec2 p : {w.a, w.b}) pushOut(p, w.thickness / 2.0);
+        for (const auto& b : doc.beams)
+            if (b.levelId == levelId)
+                for (Vec2 p : {b.a, b.b}) pushOut(p, 3.0);
+        for (const auto& p : doc.posts)
+            if (p.levelId == levelId) pushOut(p.position, 3.0);
+
         std::vector<std::vector<double>> rows;
         if (!openings.empty()) rows.push_back(nearest);
         if (corners.size() > 2) rows.push_back(corners);
         rows.push_back({corners.front(), corners.back()});
 
         for (size_t r = 0; r < rows.size(); ++r) {
-            const double distanceOut = outside + kRowSpacing * static_cast<double>(r + 1);
+            const double distanceOut = clear + kRowSpacing * static_cast<double>(r + 1);
             for (size_t k = 0; k + 1 < rows[r].size(); ++k) {
                 Dimension d;
                 d.levelId = levelId;

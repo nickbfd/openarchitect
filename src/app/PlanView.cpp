@@ -2,10 +2,12 @@
 
 #include "Workspace.h"
 
+#include "oa/core/terrain.h"
 #include "oa/core/units.h"
 #include "oa/structural/members.h"
 #include "oa/structural/posts.h"
 
+#include <QEvent>
 #include <QKeyEvent>
 #include <QLineF>
 #include <QMenu>
@@ -26,6 +28,29 @@ constexpr double kSnapPixels = 10.0;
 constexpr double kAngleStep = kPi / 12.0; // 15 degrees
 
 QString lengthText(double inches) { return QString::fromStdString(formatFeetInches(inches, 8)); }
+
+// The size callout drafters write on doors and windows: feet and inches of
+// width, then of height, so 3'-0" x 6'-8" is "3068".
+QString sizeCallout(double width, double height) {
+    auto part = [](double inches) {
+        const long whole = std::lround(inches);
+        return QString::number(whole / 12) + QString::number(whole % 12);
+    };
+    return part(width) + part(height);
+}
+
+// Text drawn centered on `at`, turned to run along `dir` and kept upright.
+void drawAlong(QPainter& g, QPointF at, QPointF dir, const QString& text, double lift) {
+    double deg = std::atan2(dir.y(), dir.x()) * 180.0 / kPi;
+    if (deg > 90.0) deg -= 180.0;
+    if (deg <= -90.0) deg += 180.0;
+    g.save();
+    g.translate(at);
+    g.rotate(deg);
+    const QRectF box(-80, -lift - 16, 160, 16);
+    g.drawText(box, Qt::AlignCenter, text);
+    g.restore();
+}
 
 QColor roomColor(RoomType t) {
     switch (t) {
@@ -96,8 +121,19 @@ void PlanView::setTool(Tool tool) {
         "Click the two ends of the eave bearing line (usually the wall), then click on the high side to set how far the plane runs uphill.",
         "Click the edge of a roof plane to change, then click the roof plane it should meet. The edge moves to the hip, valley or ridge line.",
         "Click to place a post, for example under a porch beam end. It snaps to beam and wall ends.",
+        "Click the two points to dimension, then click where the dimension line goes. Type a length after the first click to set it.",
+        "Click to place a spot elevation on the site, then set its height in Properties. Contours run between the points.",
     };
     emit statusMessage(hints[static_cast<int>(tool)]);
+    update();
+}
+
+void PlanView::setOpeningSize(OpeningKind kind, double width, double height, double sill) {
+    (kind == OpeningKind::Door ? doorSize_ : windowSize_) = {width, height, sill};
+}
+
+void PlanView::setShowOpeningSizes(bool show) {
+    showOpeningSizes_ = show;
     update();
 }
 
@@ -235,6 +271,14 @@ std::vector<ObjectId> PlanView::pickAll(Vec2 p) const {
     const double tol = kPickPixels / scale_;
     std::vector<ObjectId> hits;
 
+    for (const auto& d : doc().dimensions) {
+        if (d.levelId != level || d.length() < 1e-6) continue;
+        const Vec2 n = (d.b - d.a).normalized().perp() * d.offset;
+        if (Segment{d.a + n, d.b + n}.distanceTo(p) <= tol) hits.push_back(d.id);
+    }
+    if (const Level* ground = doc().groundLevel(); ground && ground->id == level)
+        for (const auto& e : doc().terrain.points)
+            if (distance(e.position, p) <= tol) hits.push_back(e.id);
     for (const auto& post : doc().posts) {
         const auto* m = structural::findPost(post.memberId);
         const double half = (m ? m->d : 3.5) / 2.0 + tol;
@@ -333,6 +377,7 @@ void PlanView::paintEvent(QPaintEvent*) {
     g.setRenderHint(QPainter::Antialiasing);
 
     drawGrid(g);
+    drawTerrain(g);
     drawLevelBelow(g);
     drawRooms(g);
     drawPlatforms(g);
@@ -342,8 +387,10 @@ void PlanView::paintEvent(QPaintEvent*) {
     drawRoofs(g);
     drawRoofPlanes(g);
     drawPosts(g);
+    drawDimensions(g);
     if (showLoads_) drawLoads(g);
     drawToolPreview(g);
+    drawTyped(g);
 
     const Level* level = doc().level(ws_->currentLevel());
     g.setPen(QColor(90, 90, 90));
@@ -399,12 +446,32 @@ void PlanView::drawRooms(QPainter& g) const {
         g.setBrush(roomColor(r.type));
         g.drawPolygon(poly);
 
-        const QPointF c = toScreen(centroid(r.outline));
+        const bool ownFloor = r.floor.kind != FloorSystemKind::LevelFraming;
+        const QPointF c = toScreen(centroid(r.outline)) - QPointF(0, ownFloor ? 9 : 0);
         const double sqft = area(r.outline) / kSqInPerSqFt;
         g.setPen(QColor(60, 60, 60));
         g.drawText(QRectF(c.x() - 80, c.y() - 18, 160, 18), Qt::AlignCenter, QString::fromStdString(r.name));
         g.setPen(QColor(120, 120, 120));
         g.drawText(QRectF(c.x() - 80, c.y(), 160, 18), Qt::AlignCenter, QString("%1 sq ft").arg(sqft, 0, 'f', 0));
+        if (ownFloor) {
+            if (r.floor.kind == FloorSystemKind::Slab) {
+                g.setPen(Qt::NoPen);
+                g.setBrush(QBrush(QColor(150, 150, 150, 110), Qt::Dense6Pattern));
+                g.drawPolygon(poly);
+            }
+            QString floor = r.floor.kind == FloorSystemKind::Slab
+                                ? QString("%1\" slab").arg(r.floor.slabThickness)
+                                : QString::fromStdString(r.floor.joists);
+            if (r.floor.drop > 1e-6)
+                floor += QString(", %1\" down").arg(r.floor.drop);
+            g.setPen(QColor(90, 90, 90));
+            QFont italic = g.font();
+            italic.setItalic(true);
+            g.save();
+            g.setFont(italic);
+            g.drawText(QRectF(c.x() - 100, c.y() + 16, 200, 18), Qt::AlignCenter, floor);
+            g.restore();
+        }
     }
 }
 
@@ -501,10 +568,34 @@ void PlanView::drawOpenings(QPainter& g) const {
             g.drawArc(QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r), int(startDeg * 16), int(90 * 16));
         }
         if (selected) drawLengthLabel(g, s0 + n * 3.0, s1 + n * 3.0);
+        if (showOpeningSizes_ && !selected) {
+            // Outside the wall (to the right of its direction, where exterior walls drawn
+            // counter-clockwise face out), clear of the door swing.
+            const Vec2 mid = (s0 + s1) * 0.5 - dir.perp() * (w->thickness / 2.0);
+            g.setPen(QColor(40, 40, 120));
+            QFont f = g.font();
+            const QFont old = f;
+            f.setPointSizeF(std::max(6.5, old.pointSizeF() - 1.0));
+            g.setFont(f);
+            const QPointF a = toScreen(mid), b = toScreen(mid + dir);
+            QPointF out = toScreen(mid - dir.perp()) - a;
+            const double len = std::hypot(out.x(), out.y());
+            if (len > 1e-9) out /= len;
+            drawAlong(g, a + out * 10.0, b - a, sizeCallout(o.width, o.height), -8.0);
+            g.setFont(old);
+        }
     }
 }
 
 void PlanView::drawBeams(QPainter& g) const {
+    Vec2 lo{1e30, 1e30}, hi{-1e30, -1e30};
+    for (const auto& w : doc().walls)
+        if (w.levelId == ws_->currentLevel())
+            for (Vec2 p : {w.a, w.b}) {
+                lo = {std::min(lo.x, p.x), std::min(lo.y, p.y)};
+                hi = {std::max(hi.x, p.x), std::max(hi.y, p.y)};
+            }
+    const Vec2 middle = lo.x <= hi.x ? (lo + hi) * 0.5 : Vec2{};
     for (const auto& b : doc().beams) {
         if (b.levelId != ws_->currentLevel()) continue;
         const bool selected = b.id == ws_->selection();
@@ -515,9 +606,12 @@ void PlanView::drawBeams(QPainter& g) const {
 
         const auto* member = structural::findMember(b.memberId);
         const QString label = member ? QString::fromStdString(member->name) : QString("Beam, not sized");
+        // The label goes on the side of the beam away from the middle of the
+        // level, so a porch beam's label sits outside the porch.
         const QPointF mid = toScreen((b.a + b.b) * 0.5);
+        const bool below = mid.y() > toScreen(middle).y();
         g.setPen(QColor(140, 80, 20));
-        g.drawText(mid + QPointF(6, -8), label);
+        g.drawText(mid + QPointF(6, below ? 18 : -8), label);
         if (selected) drawLengthLabel(g, b.a, b.b);
     }
 }
@@ -633,6 +727,74 @@ void PlanView::drawPosts(QPainter& g) const {
     }
 }
 
+void PlanView::drawDimension(QPainter& g, Vec2 a, Vec2 b, double offset, bool selected) const {
+    if (distance(a, b) < 1e-6) return;
+    const Vec2 dir = (b - a).normalized(), n = dir.perp();
+    const Vec2 da = a + n * offset, db = b + n * offset;
+    const QColor color = selected ? QColor(30, 110, 220) : QColor(50, 50, 50);
+    g.setPen(QPen(color, selected ? 1.5 : 1.0));
+    // Extension lines start a little off the object and run just past the dimension line.
+    const double gap = 3.0 / scale_, over = 4.0 / scale_;
+    const double side = offset >= 0 ? 1.0 : -1.0;
+    if (std::abs(offset) > gap) {
+        g.drawLine(toScreen(a + n * side * gap), toScreen(da + n * side * over));
+        g.drawLine(toScreen(b + n * side * gap), toScreen(db + n * side * over));
+    }
+    g.drawLine(toScreen(da), toScreen(db));
+    // Architectural ticks: short slashes at 45 degrees.
+    const Vec2 tick = (dir + n).normalized() * (4.0 / scale_);
+    for (Vec2 p : {da, db}) g.drawLine(toScreen(p - tick), toScreen(p + tick));
+    const QPointF sa = toScreen(da), sb = toScreen(db);
+    drawAlong(g, (sa + sb) / 2.0, sb - sa, lengthText(distance(a, b)), 2.0);
+}
+
+void PlanView::drawDimensions(QPainter& g) const {
+    for (const auto& d : doc().dimensions)
+        if (d.levelId == ws_->currentLevel()) drawDimension(g, d.a, d.b, d.offset, d.id == ws_->selection());
+}
+
+void PlanView::drawTerrain(QPainter& g) const {
+    const Level* ground = doc().groundLevel();
+    if (!ground || ground->id != ws_->currentLevel()) return;
+    const Terrain& t = doc().terrain;
+    std::vector<double> labeled;
+    for (const auto& s : contourLines(t)) {
+        g.setPen(QPen(QColor(150, 110, 60, s.major ? 220 : 170), s.major ? 1.8 : 1.0));
+        g.drawLine(toScreen(s.a), toScreen(s.b));
+        // Label each contour once, on its first piece long enough to hold the text.
+        if (distance(s.a, s.b) * scale_ < 50) continue;
+        if (std::find_if(labeled.begin(), labeled.end(), [&](double z) { return std::abs(z - s.elevation) < 1e-6; }) !=
+            labeled.end())
+            continue;
+        labeled.push_back(s.elevation);
+        g.setPen(QColor(120, 80, 30));
+        const QPointF a = toScreen(s.a), b = toScreen(s.b);
+        drawAlong(g, (a + b) / 2.0, b - a, lengthText(s.elevation), 1.0);
+    }
+    for (const auto& p : t.points) {
+        const bool selected = p.id == ws_->selection();
+        const QPointF c = toScreen(p.position);
+        g.setPen(QPen(selected ? QColor(30, 110, 220) : QColor(120, 80, 30), selected ? 2 : 1.2));
+        g.setBrush(Qt::NoBrush);
+        g.drawLine(c + QPointF(-5, -5), c + QPointF(5, 5));
+        g.drawLine(c + QPointF(-5, 5), c + QPointF(5, -5));
+        g.drawEllipse(c, 6, 6);
+        g.drawText(c + QPointF(8, -6), lengthText(p.elevation));
+    }
+}
+
+void PlanView::drawTyped(QPainter& g) const {
+    if (typed_.isEmpty()) return;
+    const QPointF c = toScreen(cursor_) + QPointF(16, 16);
+    const QString text = QString("Length: %1   Enter to place, Esc to cancel").arg(typed_);
+    const QRectF box(c, QSizeF(g.fontMetrics().horizontalAdvance(text) + 16, 22));
+    g.setPen(QColor(30, 110, 220));
+    g.setBrush(QColor(255, 255, 255, 240));
+    g.drawRoundedRect(box, 4, 4);
+    g.setPen(QColor(20, 20, 20));
+    g.drawText(box.adjusted(8, 0, -8, 0), Qt::AlignVCenter | Qt::AlignLeft, text);
+}
+
 void PlanView::drawLoads(QPainter& g) const {
     const auto& result = ws_->loads();
     double maxPlf = 1.0;
@@ -705,9 +867,25 @@ void PlanView::drawToolPreview(QPainter& g) const {
                 const double width = tool_ == Tool::Wall ? (t ? t->thickness() : 5.5) : 3.5;
                 g.setPen(QPen(QColor(30, 110, 220, 160), std::max(2.0, pixels(width))));
             }
-            g.drawLine(toScreen(*anchor_), toScreen(cursor_));
-            drawLengthLabel(g, *anchor_, cursor_);
+            // While a length is being typed, show the piece at that length.
+            Vec2 end = cursor_;
+            if (const auto typed = parseLength(typed_.toStdString()); typed && *typed >= 1.0) {
+                const Vec2 d = cursor_ - *anchor_;
+                end = *anchor_ + (d.length() < 1e-6 ? Vec2{1, 0} : d.normalized()) * *typed;
+            }
+            g.drawLine(toScreen(*anchor_), toScreen(end));
+            drawLengthLabel(g, *anchor_, end);
         }
+        break;
+    case Tool::Dimension:
+        if (anchor_ && !anchor2_) {
+            drawDimension(g, *anchor_, cursor_, 0.0, true);
+        } else if (anchor_ && anchor2_) {
+            const Vec2 dir = (*anchor2_ - *anchor_).normalized();
+            drawDimension(g, *anchor_, *anchor2_, dot(cursor_ - *anchor_, dir.perp()), true);
+        }
+        break;
+    case Tool::Elevation:
         break;
     case Tool::Post: {
         const QPointF c = toScreen(cursor_);
@@ -747,7 +925,7 @@ void PlanView::drawToolPreview(QPainter& g) const {
     case Tool::Door:
     case Tool::Window:
         if (const Wall* w = wallNear(cursor_, kPickPixels, true)) {
-            const double width = 36.0;
+            const double width = std::min((tool_ == Tool::Door ? doorSize_ : windowSize_).width, w->length());
             const double along = std::clamp(w->centerline().project(cursor_) * w->length(), width / 2, w->length() - width / 2);
             const Vec2 dir = (w->b - w->a).normalized();
             const Vec2 n = dir.perp() * (w->thickness / 2.0 + 2.0 / scale_);
@@ -761,8 +939,14 @@ void PlanView::drawToolPreview(QPainter& g) const {
     case Tool::RoofPlane:
         if (anchor_ && !anchor2_) {
             g.setPen(QPen(QColor(150, 60, 60, 200), 2));
-            g.drawLine(toScreen(*anchor_), toScreen(cursor_));
-            drawLengthLabel(g, *anchor_, cursor_);
+            // While a length is being typed, show the piece at that length.
+            Vec2 end = cursor_;
+            if (const auto typed = parseLength(typed_.toStdString()); typed && *typed >= 1.0) {
+                const Vec2 d = cursor_ - *anchor_;
+                end = *anchor_ + (d.length() < 1e-6 ? Vec2{1, 0} : d.normalized()) * *typed;
+            }
+            g.drawLine(toScreen(*anchor_), toScreen(end));
+            drawLengthLabel(g, *anchor_, end);
         } else if (anchor_ && anchor2_) {
             Vec2 a = *anchor_, b = *anchor2_;
             const double run = cross((b - a).normalized(), cursor_ - a);
@@ -798,7 +982,8 @@ void PlanView::placeOpening(Vec2 p, OpeningKind kind) {
         return;
     }
     const ObjectId wallId = w->id;
-    const double width = 36.0;
+    const OpeningSize size = kind == OpeningKind::Door ? doorSize_ : windowSize_;
+    const double width = std::min(size.width, w->length());
     const double along = std::round(std::clamp(w->centerline().project(p) * w->length(), width / 2, w->length() - width / 2));
     ObjectId created = kNoId;
     ws_->edit(kind == OpeningKind::Door ? "Add door" : "Add window", [&](Document& d) {
@@ -808,8 +993,8 @@ void PlanView::placeOpening(Vec2 p, OpeningKind kind) {
         o.kind = kind;
         o.offset = along;
         o.width = width;
-        o.height = kind == OpeningKind::Door ? 80.0 : 48.0;
-        o.sillHeight = kind == OpeningKind::Door ? 0.0 : 36.0;
+        o.height = size.height;
+        o.sillHeight = size.sill;
         d.openings.push_back(o);
         created = o.id;
     });
@@ -913,6 +1098,45 @@ void PlanView::placePost(Vec2 p) {
     ws_->select(created);
 }
 
+void PlanView::finishDimension(Vec2 a, Vec2 b, Vec2 at) {
+    const double offset = std::round(dot(at - a, (b - a).normalized().perp()));
+    const ObjectId level = ws_->currentLevel();
+    ObjectId created = kNoId;
+    ws_->edit("Add dimension", [&](Document& d) {
+        Dimension x;
+        x.id = d.newId();
+        x.levelId = level;
+        x.a = a;
+        x.b = b;
+        x.offset = offset;
+        d.dimensions.push_back(x);
+        created = x.id;
+    });
+    ws_->select(created);
+}
+
+void PlanView::placeElevation(Vec2 p) {
+    const Level* ground = doc().groundLevel();
+    if (!ground || ground->id != ws_->currentLevel()) {
+        emit statusMessage("The terrain is on the lowest level. Switch to it to place elevation points.");
+        return;
+    }
+    // Start from the height the terrain already has there, or the last point's.
+    double z = doc().terrain.points.empty() ? -12.0 : doc().terrain.points.back().elevation;
+    if (auto h = terrainHeightAt(doc().terrain, p)) z = std::round(*h);
+    ObjectId created = kNoId;
+    ws_->edit("Add elevation point", [&](Document& d) {
+        ElevationPoint e;
+        e.id = d.newId();
+        e.position = p;
+        e.elevation = z;
+        d.terrain.points.push_back(e);
+        created = e.id;
+    });
+    ws_->select(created);
+    emit statusMessage("Set the point's elevation in Properties. Elevations are relative to the first floor.");
+}
+
 void PlanView::joinClick(Vec2 p) {
     if (!joinEdge_) {
         joinEdge_ = roofEdgeNear(p);
@@ -973,7 +1197,6 @@ void PlanView::mousePressEvent(QMouseEvent* e) {
 
     const Vec2 raw = toWorld(pos);
     const Vec2 p = snap(raw, anchor_, e->modifiers());
-    const ObjectId level = ws_->currentLevel();
 
     switch (tool_) {
     case Tool::Select: {
@@ -1005,7 +1228,8 @@ void PlanView::mousePressEvent(QMouseEvent* e) {
                 cycleOnRelease_ = hits.size() > 1 && hits == stack_;
             }
             selectFromStack(hits, hit);
-            if (doc().wall(hit) || doc().beam(hit) || doc().opening(hit) || doc().roofPlane(hit) || doc().post(hit))
+            if (doc().wall(hit) || doc().beam(hit) || doc().opening(hit) || doc().roofPlane(hit) || doc().post(hit) ||
+                doc().dimension(hit) || doc().elevationPoint(hit))
                 drag_ = Drag::Move;
         }
         if (drag_ != Drag::None) {
@@ -1014,6 +1238,19 @@ void PlanView::mousePressEvent(QMouseEvent* e) {
         }
         break;
     }
+    default:
+        typed_.clear();
+        toolClick(p, raw);
+        break;
+    }
+    update();
+}
+
+// What a click does with a drawing tool at the snapped point `p`. Typing a
+// length and pressing Enter clicks too, at that distance from the anchor.
+void PlanView::toolClick(Vec2 p, Vec2 raw) {
+    const ObjectId level = ws_->currentLevel();
+    switch (tool_) {
     case Tool::Wall:
     case Tool::RoomDivider:
     case Tool::Beam:
@@ -1068,6 +1305,23 @@ void PlanView::mousePressEvent(QMouseEvent* e) {
             finishRoofPlane(a, b, p);
         }
         break;
+    case Tool::Dimension:
+        if (!anchor_) {
+            anchor_ = p;
+        } else if (!anchor2_) {
+            if (distance(*anchor_, p) >= 1.0) anchor2_ = p;
+        } else {
+            const Vec2 a = *anchor_, b = *anchor2_;
+            anchor_.reset();
+            anchor2_.reset();
+            finishDimension(a, b, p);
+        }
+        break;
+    case Tool::Elevation:
+        placeElevation(p);
+        break;
+    case Tool::Select:
+        break;
     }
     update();
 }
@@ -1082,7 +1336,7 @@ void PlanView::mouseMoveEvent(QMouseEvent* e) {
     }
     const Vec2 raw = toWorld(pos);
     const bool twoPoint = tool_ == Tool::Wall || tool_ == Tool::RoomDivider || tool_ == Tool::Beam ||
-                          (tool_ == Tool::RoofPlane && !anchor2_);
+                          ((tool_ == Tool::RoofPlane || tool_ == Tool::Dimension) && !anchor2_);
     cursor_ = snap(raw, twoPoint ? anchor_ : std::nullopt, e->modifiers());
 
     if (drag_ != Drag::None && preview_) {
@@ -1122,6 +1376,12 @@ void PlanView::mouseMoveEvent(QMouseEvent* e) {
             }
         } else if (Post* post = d.post(sel)) {
             post->position = snap(raw, std::nullopt, e->modifiers());
+        } else if (ElevationPoint* ep = d.elevationPoint(sel)) {
+            ep->position = snap(raw, std::nullopt, e->modifiers());
+        } else if (Dimension* dim = d.dimension(sel)) {
+            // Dragging a dimension slides its line toward or away from what it measures.
+            const Dimension& before = *ws_->doc().dimension(sel);
+            dim->offset = std::round(before.offset + dot(raw - dragStart_, (before.b - before.a).normalized().perp()));
         } else if (Opening* o = d.opening(sel)) {
             if (const Wall* w = d.wall(o->wallId))
                 o->offset = std::round(std::clamp(w->centerline().project(raw) * w->length(), o->width / 2,
@@ -1185,7 +1445,87 @@ void PlanView::wheelEvent(QWheelEvent* e) {
     update();
 }
 
+bool PlanView::takesTypedLength() const {
+    switch (tool_) {
+    case Tool::Wall:
+    case Tool::RoomDivider:
+    case Tool::Beam:
+        return anchor_.has_value();
+    case Tool::RoofPlane:
+    case Tool::Dimension:
+        return anchor_ && !anchor2_;
+    default:
+        return false;
+    }
+}
+
+namespace {
+// Keys that type a length: digits, feet and inch marks, fractions, spaces.
+bool lengthKey(const QKeyEvent* e) {
+    const QString t = e->text();
+    return t.size() == 1 && QString("0123456789'\" ./-").contains(t[0]);
+}
+} // namespace
+
+// While a length is being typed, keys that are also shortcuts (like a
+// space or a letter) go to the plan instead of the menus.
+bool PlanView::event(QEvent* e) {
+    if (e->type() == QEvent::ShortcutOverride && takesTypedLength()) {
+        auto* k = static_cast<QKeyEvent*>(e);
+        if (lengthKey(k) || (!typed_.isEmpty() && (k->key() == Qt::Key_Backspace || k->key() == Qt::Key_Return ||
+                                                   k->key() == Qt::Key_Enter || k->key() == Qt::Key_Escape ||
+                                                   !k->text().isEmpty()))) {
+            e->accept();
+            return true;
+        }
+    }
+    return QWidget::event(e);
+}
+
+void PlanView::commitTyped() {
+    const auto length = parseLength(typed_.toStdString());
+    if (!length || *length < 1.0 || !anchor_) {
+        emit statusMessage(QString("\"%1\" isn't a length. Try 12' 6\" or 150.").arg(typed_));
+        return;
+    }
+    // The direction comes from the mouse, snapped to 15 degree steps.
+    Vec2 dir = cursor_ - *anchor_;
+    dir = dir.length() < 1e-6 ? Vec2{1, 0} : dir.normalized();
+    const Vec2 end = *anchor_ + dir * *length;
+    typed_.clear();
+    toolClick(end, end);
+    cursor_ = end;
+    update();
+}
+
 void PlanView::keyPressEvent(QKeyEvent* e) {
+    if (takesTypedLength()) {
+        if (lengthKey(e) && !(typed_.isEmpty() && e->text() == " ")) {
+            typed_ += e->text();
+            update();
+            return;
+        }
+        if (!typed_.isEmpty()) {
+            switch (e->key()) {
+            case Qt::Key_Backspace:
+                typed_.chop(1);
+                break;
+            case Qt::Key_Return:
+            case Qt::Key_Enter:
+                commitTyped();
+                break;
+            case Qt::Key_Escape:
+                typed_.clear();
+                break;
+            default:
+                break;
+            }
+            update();
+            return;
+        }
+    } else {
+        typed_.clear();
+    }
     switch (e->key()) {
     case Qt::Key_Escape:
         if (anchor_ || joinEdge_ || drag_ != Drag::None) {

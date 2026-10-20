@@ -15,7 +15,9 @@ class Workspace;
 class PlanView : public QWidget {
     Q_OBJECT
 public:
-    enum class Tool { Select, Wall, Door, Window, Beam, Floor, Roof, RoomDivider, RoofPlane, JoinPlanes, Post };
+    enum class Tool {
+        Select, Wall, Door, Window, Beam, Floor, Roof, RoomDivider, RoofPlane, JoinPlanes, Post, Dimension, Elevation
+    };
 
     explicit PlanView(Workspace* ws, QWidget* parent = nullptr);
 
@@ -26,6 +28,9 @@ public:
     // The wall type new walls get.
     void setWallType(oa::ObjectId id) { wallTypeId_ = id; }
     oa::ObjectId wallType() const { return wallTypeId_; }
+    // The size new doors or windows get.
+    void setOpeningSize(oa::OpeningKind kind, double width, double height, double sill);
+    void setShowOpeningSizes(bool show);
 
 public slots:
     void zoomToFit();
@@ -36,6 +41,7 @@ signals:
     void toolChanged(PlanView::Tool tool);
 
 protected:
+    bool event(QEvent* e) override;
     void paintEvent(QPaintEvent*) override;
     void mousePressEvent(QMouseEvent* e) override;
     void mouseMoveEvent(QMouseEvent* e) override;
@@ -80,6 +86,10 @@ private:
     void drawRoofs(QPainter& g) const;
     void drawRoofPlanes(QPainter& g) const;
     void drawPosts(QPainter& g) const;
+    void drawDimensions(QPainter& g) const;
+    void drawDimension(QPainter& g, oa::Vec2 a, oa::Vec2 b, double offset, bool selected) const;
+    void drawTerrain(QPainter& g) const;
+    void drawTyped(QPainter& g) const;
     void drawLoads(QPainter& g) const;
     void drawToolPreview(QPainter& g) const;
     void drawLengthLabel(QPainter& g, oa::Vec2 a, oa::Vec2 b) const;
@@ -90,11 +100,24 @@ private:
     void addWall(oa::Vec2 a, oa::Vec2 b);
     void placePost(oa::Vec2 p);
     void joinClick(oa::Vec2 p);
+    void toolClick(oa::Vec2 p, oa::Vec2 raw);
+    void finishDimension(oa::Vec2 a, oa::Vec2 b, oa::Vec2 at);
+    void placeElevation(oa::Vec2 p);
+    // Typing a length while drawing: the tools that take one, and Enter.
+    bool takesTypedLength() const;
+    void commitTyped();
 
     Workspace* ws_;
     Tool tool_ = Tool::Select;
     bool showLoads_ = false;
     oa::ObjectId wallTypeId_ = oa::kNoId;
+    bool showOpeningSizes_ = true;
+    struct OpeningSize {
+        double width, height, sill;
+    };
+    OpeningSize doorSize_{36, 80, 0};
+    OpeningSize windowSize_{36, 48, 32};
+    QString typed_; // a length being typed while drawing
     // First pick of the join tool: a roof plane and one of its edges.
     std::optional<std::pair<oa::ObjectId, int>> joinEdge_;
 

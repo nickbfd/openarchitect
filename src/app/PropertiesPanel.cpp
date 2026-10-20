@@ -102,6 +102,8 @@ void PropertiesPanel::rebuild() {
     else if (const RoofPlane* p = d.roofPlane(id)) showRoofPlane(*p);
     else if (const FloorPlatform* f = Document::findIn(d.platforms, id)) showPlatform(*f);
     else if (const Room* rm = Document::findIn(d.rooms, id)) showRoom(*rm);
+    else if (const Dimension* dm = d.dimension(id)) showDimension(*dm);
+    else if (const ElevationPoint* e = d.elevationPoint(id)) showElevationPoint(*e);
     else showPlan();
 }
 
@@ -273,6 +275,47 @@ void PropertiesPanel::showPlan() {
     number("Thermal Ct", d.site.thermalCt, 0.85, 1.3, 2, "", [](Document& doc, double v) { doc.site.thermalCt = v; });
     number("Importance Is", d.site.importanceIs, 0.8, 1.2, 2, "", [](Document& doc, double v) { doc.site.importanceIs = v; });
     info("Flat roof snow pf", QString("%1 psf").arg(flatRoofSnowPsf(d.site), 0, 'f', 1));
+    showTerrain();
+}
+
+void PropertiesPanel::showTerrain() {
+    const Document& d = ws_->doc();
+    heading("Terrain");
+    info("Elevation points", QString::number(d.terrain.points.size()));
+    length("Contour interval", d.terrain.contourInterval,
+           [](Document& doc, double v) { doc.terrain.contourInterval = v; }, 1.0);
+    note("<span style='color:#666'>Use the Elevation point tool on the ground level to add spot elevations. "
+         "Contours are drawn between three or more points. Elevations are measured from the lowest level's "
+         "floor.</span>");
+}
+
+void PropertiesPanel::showDimension(const Dimension& dim) {
+    const ObjectId id = dim.id;
+    heading(ws_->describe(id));
+    info("Measures", feetInches(dim.length()));
+    length("Offset from the points", std::abs(dim.offset), [id](Document& d, double v) {
+        Dimension* x = d.dimension(id);
+        x->offset = x->offset < 0 ? -v : v;
+    });
+    check("Flip to the other side", dim.offset < 0, [id](Document& d, bool v) {
+        Dimension* x = d.dimension(id);
+        x->offset = v ? -std::abs(x->offset) : std::abs(x->offset);
+    });
+    if (dim.automatic)
+        note("<span style='color:#666'>Made by Dimension exterior walls. Running that again replaces it; "
+             "edit it and it is kept.</span>");
+    else
+        note("<span style='color:#666'>Drag the dimension line on the plan to move it in or out.</span>");
+}
+
+void PropertiesPanel::showElevationPoint(const ElevationPoint& e) {
+    const ObjectId id = e.id;
+    heading(ws_->describe(id));
+    length("Elevation", e.elevation, [id](Document& d, double v) { d.elevationPoint(id)->elevation = v; }, -1e6);
+    info("Position", QString("%1, %2").arg(feetInches(e.position.x), feetInches(e.position.y)));
+    note("<span style='color:#666'>Measured from the lowest level's floor; negative is below it. Type a minus "
+         "sign for grade below the floor, like -1' 6\".</span>");
+    showTerrain();
 }
 
 void PropertiesPanel::showWall(const Wall& w) {
@@ -580,4 +623,46 @@ void PropertiesPanel::showRoom(const Room& r) {
         types << QString("%1 (%2 psf live)").arg(toString(static_cast<RoomType>(t))).arg(defaultLiveLoadPsf(static_cast<RoomType>(t)));
     choice("Type", types, static_cast<int>(r.type), [id](Document& d, int v) { d.room(id)->type = static_cast<RoomType>(v); });
     info("Area", QString("%1 sq ft").arg(area(r.outline) / kSqInPerSqFt, 0, 'f', 0));
+    showRoomFloor(r);
+}
+
+// The floor system under one room: the level's framing, its own joists, or a slab.
+void PropertiesPanel::showRoomFloor(const Room& r) {
+    const ObjectId id = r.id;
+    const Document& doc = ws_->doc();
+    const RoomFloor& f = r.floor;
+    heading("Floor system");
+    choice("Floor", {"Level's floor framing", "Own joists", "Concrete slab"}, static_cast<int>(f.kind),
+           [id](Document& d, int v) { d.room(id)->floor.kind = static_cast<FloorSystemKind>(v); });
+    if (f.kind == FloorSystemKind::LevelFraming) return;
+
+    if (f.kind == FloorSystemKind::Joists) {
+        text("Joists", QString::fromStdString(f.joists), [id](Document& d, const std::string& v) { d.room(id)->floor.joists = v; });
+        check("Own joist direction", f.customJoistAxis, [id](Document& d, bool v) { d.room(id)->floor.customJoistAxis = v; });
+        if (f.customJoistAxis)
+            choice("Joists run", {"East-west (X)", "North-south (Y)"}, f.joistAxis == Axis::X ? 0 : 1,
+                   [id](Document& d, int v) { d.room(id)->floor.joistAxis = v == 0 ? Axis::X : Axis::Y; });
+    } else {
+        length("Slab thickness", f.slabThickness, [id](Document& d, double v) { d.room(id)->floor.slabThickness = v; }, 1.0);
+        text("Slab note", QString::fromStdString(f.slabNote), [id](Document& d, const std::string& v) { d.room(id)->floor.slabNote = v; });
+    }
+    length("Drop below the level's floor", f.drop, [id](Document& d, double v) { d.room(id)->floor.drop = v; });
+    number(f.kind == FloorSystemKind::Slab ? "Extra dead load" : "Dead load", f.deadPsf, 0, 200, 1, " psf",
+           [id](Document& d, double v) { d.room(id)->floor.deadPsf = v; });
+    number("Live load (0 = room type)", f.livePsf, 0, 250, 1, " psf", [id](Document& d, double v) { d.room(id)->floor.livePsf = v; });
+
+    const bool onGround = doc.levelBelow(r.levelId) == nullptr;
+    if (f.kind == FloorSystemKind::Slab) {
+        const double slab = 150.0 * f.slabThickness / 12.0;
+        info("Slab weight", QString("%1 psf").arg(slab, 0, 'f', 0));
+        note(onGround ? "<span style='color:#666'>This slab is on the lowest level, so it bears on the ground and "
+                        "puts no load on walls or beams.</span>"
+                      : "<span style='color:#666'>This slab is on an upper level, so its weight and the room's live "
+                        "load go to the walls and beams below in place of the level's floor framing.</span>");
+    } else {
+        note(onGround ? "<span style='color:#666'>The lowest level bears on the ground, so this room's joists "
+                        "carry no load to walls or beams here.</span>"
+                      : "<span style='color:#666'>This room's floor loads replace the level's framing over the "
+                        "room and go to the walls and beams below.</span>");
+    }
 }

@@ -8,6 +8,7 @@
 
 class QAction;
 class QComboBox;
+class QMenu;
 class QTabWidget;
 class ModelView3D;
 class Workspace;
@@ -26,6 +27,8 @@ private:
     void createActions();
     void refreshLevels();
     void refreshWallTypes();
+    void useTool(PlanView::Tool tool);
+    void autoDimensions();
     void updateTitle();
     void updateUndoActions();
     bool maybeSave();
@@ -40,7 +43,7 @@ private:
     ModelView3D* model_;
     QTabWidget* tabs_;
     QComboBox* levelBox_;
-    QComboBox* wallTypeBox_ = nullptr;
+    QMenu* wallMenu_ = nullptr;
     QAction* undoAction_ = nullptr;
     QAction* redoAction_ = nullptr;
 };

@@ -11,6 +11,12 @@ Windows and Linux are first-class platforms. macOS is built and tested in CI on 
 - **2D plan editor**: walls (with chaining, angle and end snapping), doors, windows, beams, posts, floor framing, gable or hip roofs, and single roof planes (shed and porch roofs, or a roof built plane by plane), on multiple levels, with the level below shown for reference. Select, move, stretch, delete, and undo or redo anything. Where objects are stacked (a beam over a window in a wall), click the same spot again, press Tab, or right-click to pick the one you want.
 - **Roof planes you can reshape**: drag any corner, or the handle in the middle of any edge, to change the width, depth, eave and rake overhangs. **Join roof planes** trims an edge to the hip, valley or ridge line where it meets another plane, like Chief Architect's tool of the same name.
 - **Rooms from walls**: rooms fill the areas walls enclose and update as you edit walls, keeping their names. Room dividers are invisible walls that split an open area into rooms.
+- **Grouped toolbar**: the tools sit in drop-down menus for Walls (exterior and interior wall types, room divider), Doors and Windows (common sizes like 3068 or 3040), Roofs, Framing, Dimensions and Terrain.
+- **Typed lengths**: while drawing a wall, room divider or beam, start typing a length (`12'6`, `150`, `14' 3 1/2"`) and press Enter. The new piece runs toward the cursor, snapped to 15 degrees.
+- **Door and window labels**: each opening is labeled with its size in the usual shorthand (3068 is 3'-0" by 6'-8"). Turn them off under View.
+- **Dimensions**: draw your own with the Dimension tool, or use **Dimension exterior walls** for rows of opening, corner and overall dimensions around the outside. Drag a dimension to move it in or out.
+- **Terrain**: place elevation points on the ground level, and contours are drawn between them at the interval you set (every fifth one heavier and labeled). The ground shows in 3D.
+- **Room floor systems**: each room can keep the level's floor framing, have its own joists (a flush shower framed deeper or dropped), or be a concrete slab (a garage or patio), with its own loads and a drop below the level's floor. Slabs show in 3D.
 - **Wall types**: named build-ups (6" and 4" exterior, 4" and 6" interior, room divider) with stud size, stud spacing, insulation and finish layers. Walls take their thickness and weight from their type, and you can make your own types.
 - **3D view**: the same model in 3D with windows and doors set into walls, floors, roofs and posts. Turn on **Show wall framing in 3D** to see studs at their spacing, plates, king and jack studs, headers, sills, cripples and insulation. Click any object to select it and edit its properties. Orbit, pan, zoom.
 - **Properties panel**: edit any object, the levels, and the site snow inputs. Lengths accept feet and inches as you would type them (`12' 6 1/2"`).
@@ -40,7 +46,8 @@ To build only the model and structural libraries and their tests (no Qt needed):
 | Key | Tool |
 | --- | --- |
 | S | Select (drag to move, drag a wall end to stretch; click again, Tab or right-click for stacked objects) |
-| W | Wall (click, click, keep clicking; right-click or Esc to stop; Ctrl disables snapping) |
+| W | Wall (click, click, keep clicking; type a length and press Enter; right-click or Esc to stop; Ctrl disables snapping) |
+| I | Interior wall |
 | D / N | Door / Window (click on a wall) |
 | B | Beam |
 | J | Floor framing (drag a rectangle; joists run the short way) |
@@ -49,10 +56,14 @@ To build only the model and structural libraries and their tests (no Qt needed):
 | K | Join roof planes (click an edge, then the plane it should meet) |
 | O | Post (click; snaps to beam and wall ends) |
 | M | Room divider (an invisible wall that separates rooms) |
+| X | Dimension (click two points, then where the line goes) |
+| E | Elevation point (click on the ground level; set its elevation in Properties) |
 | G | Show wall framing in 3D |
 | L | Show loads on the plan |
 | F | Fit to window |
 | F2 / F3 | Plan / 3D |
+
+Select a room to set its floor system in Properties.
 
 Select a beam and press **Size beam…** in Properties, or a door or window in a bearing wall and press **Size header…**.
 
