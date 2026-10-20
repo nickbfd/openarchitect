@@ -9,6 +9,7 @@ Windows and Linux are first-class platforms. macOS is built and tested in CI on 
 ## What works today
 
 - **2D plan editor**: walls (with chaining, angle and end snapping), doors, windows, beams, posts, floor framing, gable or hip roofs, and single roof planes (shed and porch roofs, or a roof built plane by plane), on multiple levels, with the level below shown for reference. Select, move, stretch, delete, and undo or redo anything. Where objects are stacked (a beam over a window in a wall), click the same spot again, press Tab, or right-click to pick the one you want.
+- **Roofs built from the walls, the Chief Architect way**: Roofs > **Build roof** makes the whole roof from the exterior walls. Every wall gets a sloped plane unless its properties say **Full gable wall** or **High side of a shed**, and each wall can have its own pitch and overhang, so one setup gives hip, gable, shed, saltbox, half-hip, and L- or U-shaped roofs with their hips, valleys and ridges. Shift-select walls and use **Change to gable walls** or **Change to hip walls**. With **Rebuild automatically** on, the roof follows the walls as you edit; editing a roof plane by hand turns that off so your change stays. The sample house's roof is built this way.
 - **Roof planes you can reshape**: drag any corner, or the handle in the middle of any edge, to change the width, depth, eave and rake overhangs. **Join roof planes** trims an edge to the hip, valley or ridge line where it meets another plane, like Chief Architect's tool of the same name.
 - **Rooms from walls**: rooms fill the areas walls enclose and update as you edit walls, keeping their names. Room dividers are invisible walls that split an open area into rooms.
 - **Grouped toolbar**: the tools sit in drop-down menus for Walls (exterior and interior wall types, room divider), Doors and Windows (common sizes like 3068 or 3040), Roofs, Framing, Dimensions and Terrain.
@@ -54,7 +55,7 @@ To build only the model and structural libraries and their tests (no Qt needed):
 | D / N | Door / Window (click on a wall) |
 | B | Beam |
 | J | Floor framing (drag a rectangle; joists run the short way) |
-| R | Roof (drag a rectangle; or Tools, Roof over this level's walls) |
+| R | Roof (drag a rectangle; or Roofs, Build roof to make it from the walls) |
 | P | Roof plane (click both ends of the eave bearing line, then click the high side) |
 | K | Join roof planes (click an edge, then the plane it should meet) |
 | O | Post (click; snaps to beam and wall ends) |

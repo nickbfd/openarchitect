@@ -41,7 +41,8 @@ private:
     void buildNewFloor();
     // Shows the selected object's properties, ready to type in (Chief's Open Object).
     void openObject();
-    void autoRoof();
+    void buildRoofDialog();
+    void setWallRoof(oa::WallRoof kind);
 
     Workspace* ws_;
     PlanView* plan_;

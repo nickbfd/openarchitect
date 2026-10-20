@@ -58,6 +58,18 @@ struct WallType {
 // Wall types a new plan starts with.
 std::vector<WallType> defaultWallTypes();
 
+// What an exterior wall tells the roof builder, like the Roof panel of
+// Chief's wall specification. A sloped wall gets a roof plane rising from
+// it; a full gable wall goes up vertically to the ridge instead; a high
+// shed wall is the top of a shed roof.
+enum class WallRoof { Sloped, FullGable, HighShed };
+
+struct WallRoofSettings {
+    WallRoof kind = WallRoof::Sloped;
+    double pitch = 0.0;     // rise in 12; 0 uses the Build Roof pitch
+    double overhang = -1.0; // inches; negative uses the Build Roof eave or gable overhang
+};
+
 struct Wall {
     ObjectId id = kNoId;
     ObjectId levelId = kNoId;
@@ -68,6 +80,7 @@ struct Wall {
     bool bearing = true;
     double selfWeightPsf = 10.0; // dead load per square foot of wall face; follows the wall type
     bool roomDivider = false;  // an invisible wall that only separates rooms; follows the wall type
+    WallRoofSettings roof;
 
     Segment centerline() const { return {a, b}; }
     double length() const { return distance(a, b); }
@@ -204,6 +217,7 @@ struct RoofPlane : RoofSettings {
     // the eave carries all of it, like each side of a gable.
     bool highBearing = true;
     double run = 0.0; // only read from older files that had no outline
+    bool automatic = false; // made by Build Roof from the walls, replaced when it runs again
 
     RoofPlane() {
         pitch = 3.0;
@@ -259,6 +273,17 @@ struct Site {
     double importanceIs = 1.0;
 };
 
+// Build Roof's settings, like Chief's Build Roof dialog: the defaults the
+// walls' roof settings fall back on, and whether roofs follow wall edits.
+struct RoofDefaults {
+    double pitch = 6.0;           // rise in 12
+    double eaveOverhang = 18.0;   // inches, past the walls with sloped roofs
+    double gableOverhang = 12.0;  // inches, past gable and high shed walls
+    RoofFraming framing = RoofFraming::Rafters;
+    bool ceiling = true;          // a flat ceiling under the roof, hung from the rafters or truss chords
+    bool autoRebuild = false;     // rebuild the automatic roof after every change
+};
+
 struct Document {
     std::string name = "Untitled";
     Site site;
@@ -275,6 +300,7 @@ struct Document {
     std::vector<Dimension> dimensions;
     DimensionTo dimensionTo = DimensionTo::FramingEdge;
     bool autoRefreshDimensions = true; // automatic exterior dimensions follow wall edits
+    RoofDefaults roofDefaults;
     Terrain terrain;
     ObjectId nextId = 1;
 

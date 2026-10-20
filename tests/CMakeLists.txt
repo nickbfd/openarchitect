@@ -9,6 +9,7 @@ add_executable(oa_tests
     test_posts.cpp
     test_site.cpp
     test_editing.cpp
+    test_roofs.cpp
 )
 target_link_libraries(oa_tests PRIVATE oa::core oa::structural Catch2::Catch2WithMain)
 

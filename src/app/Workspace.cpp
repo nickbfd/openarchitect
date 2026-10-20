@@ -1,5 +1,6 @@
 #include "Workspace.h"
 
+#include "oa/core/roof_builder.h"
 #include "oa/core/serialization.h"
 
 #include <algorithm>
@@ -10,6 +11,10 @@ Workspace::Workspace(QObject* parent) : QObject(parent) { newDocument(); }
 void Workspace::edit(const QString& text, const std::function<void(oa::Document&)>& change) {
     oa::Document before = doc_;
     change(doc_);
+    // Editing a plane of an automatic roof by hand turns automatic
+    // rebuilding off, as in Chief, so the next rebuild doesn't undo it.
+    const bool handEdit = oa::roofEditedByHand(before, doc_);
+    if (handEdit) doc_.roofDefaults.autoRebuild = false;
     doc_.refresh();
     const bool wasModified = isModified();
     undo_.push(text.toStdString(), std::move(before), doc_);
@@ -17,6 +22,7 @@ void Workspace::edit(const QString& text, const std::function<void(oa::Document&
     validateState();
     emit documentChanged();
     if (wasModified != isModified()) emit modifiedChanged(isModified());
+    if (handEdit) emit notice("Automatic roof rebuilding is off so your change to the roof stays. Build roof turns it back on.");
 }
 
 void Workspace::undo() {

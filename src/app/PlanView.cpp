@@ -4,6 +4,7 @@
 
 #include "oa/core/dimensions.h"
 #include "oa/core/editing.h"
+#include "oa/core/roof_builder.h"
 #include "oa/core/terrain.h"
 #include "oa/core/units.h"
 #include "oa/structural/members.h"
@@ -957,6 +958,38 @@ void PlanView::drawRoofs(QPainter& g) const {
 }
 
 void PlanView::drawRoofPlanes(QPainter& g) const {
+    // What each exterior wall tells Build Roof, like Chief's pitch
+    // indicators: its pitch, or that it is a gable or the high side of a
+    // shed. Shown once the level has an automatic roof or a wall has roof
+    // settings of its own.
+    const Document& d = doc();
+    const ObjectId level = ws_->currentLevel();
+    const bool hasAuto = std::any_of(d.roofPlanes.begin(), d.roofPlanes.end(),
+                                     [&](const RoofPlane& r) { return r.automatic && r.levelId == level; });
+    const bool hasSettings = std::any_of(d.walls.begin(), d.walls.end(), [&](const Wall& w) {
+        return w.levelId == level && (w.roof.kind != WallRoof::Sloped || w.roof.pitch > 0 || w.roof.overhang >= 0);
+    });
+    if (hasAuto || hasSettings) {
+        QFont small = g.font();
+        small.setPointSizeF(small.pointSizeF() * 0.85);
+        g.save();
+        g.setFont(small);
+        g.setPen(QColor(150, 60, 60));
+        for (const auto& e : exteriorWallLoop(d, level)) {
+            const Wall* w = d.wall(e.wallId);
+            if (!w) continue;
+            const double pitch = w->roof.pitch > 0 ? w->roof.pitch : d.roofDefaults.pitch;
+            const QString text = w->roof.kind == WallRoof::FullGable  ? QString("Gable")
+                                 : w->roof.kind == WallRoof::HighShed ? QString("High shed")
+                                                                      : QString("%1/12").arg(pitch);
+            // Just inside the wall, clear of the dimensions outside.
+            const Vec2 inside = (e.b - e.a).normalized().perp() * (w->thickness / 2.0 + 14.0 / scale_);
+            const QPointF a = toScreen(e.a + inside), b = toScreen(e.b + inside);
+            drawAlong(g, (a + b) / 2.0, b - a, text, -8.0); // centered on the line
+        }
+        g.restore();
+    }
+
     for (const auto& r : doc().roofPlanes) {
         if (r.levelId != ws_->currentLevel() || r.outline.size() < 3) continue;
         const bool selected = ws_->isSelected(r.id);

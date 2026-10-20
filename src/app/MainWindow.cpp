@@ -9,16 +9,23 @@
 
 #include "oa/core/dimensions.h"
 #include "oa/core/editing.h"
+#include "oa/core/roof_builder.h"
 #include "oa/core/serialization.h"
+#include "oa/core/units.h"
 #include "oa/structural/takedown.h"
 
 #include <QActionGroup>
 #include <QApplication>
+#include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDockWidget>
+#include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFormLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenuBar>
@@ -62,6 +69,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ws_(new Workspace
 
     connect(props, &PropertiesPanel::sizeRequested, this, &MainWindow::openSizer);
     connect(loads, &LoadsPanel::sizeRequested, this, &MainWindow::openSizer);
+    connect(ws_, &Workspace::notice, this, [this](const QString& m) { statusBar()->showMessage(m, 15000); });
     connect(plan_, &PlanView::openObjectRequested, this, &MainWindow::openObject);
     connect(plan_, &PlanView::statusMessage, this, [this](const QString& m) { statusBar()->showMessage(m); });
 
@@ -151,8 +159,13 @@ void MainWindow::createActions() {
     QAction* floor = toolAction(PlanView::Tool::Floor, "Floor framing", "J");
     QAction* dimension = toolAction(PlanView::Tool::Dimension, "Dimension", "X");
     QAction* elevation = toolAction(PlanView::Tool::Elevation, "Elevation point", "E");
-    QAction* autoRoofAction = new QAction("Roof over this level's walls", this);
-    connect(autoRoofAction, &QAction::triggered, this, &MainWindow::autoRoof);
+    QAction* autoRoofAction = new QAction("Build roof…", this);
+    autoRoofAction->setToolTip("Build the roof from the exterior walls' roof settings, as in Chief Architect");
+    connect(autoRoofAction, &QAction::triggered, this, &MainWindow::buildRoofDialog);
+    QAction* toGable = new QAction("Change to gable walls", this);
+    connect(toGable, &QAction::triggered, this, [this] { setWallRoof(WallRoof::FullGable); });
+    QAction* toHip = new QAction("Change to hip walls", this);
+    connect(toHip, &QAction::triggered, this, [this] { setWallRoof(WallRoof::Sloped); });
     QAction* autoDims = new QAction("Dimension exterior walls", this);
     connect(autoDims, &QAction::triggered, this, &MainWindow::autoDimensions);
     QAction* interior = new QAction("Interior wall", this);
@@ -169,7 +182,7 @@ void MainWindow::createActions() {
     tools->addSection("Doors and windows");
     tools->addActions({door, window});
     tools->addSection("Roofs");
-    tools->addActions({roof, plane, join, autoRoofAction});
+    tools->addActions({autoRoofAction, toGable, toHip, roof, plane, join});
     tools->addSection("Framing");
     tools->addActions({beam, post, floor});
     tools->addSection("Dimensions and site");
@@ -226,7 +239,8 @@ void MainWindow::createActions() {
     QMenu* roofs = category("Roofs", {PlanView::Tool::Roof, PlanView::Tool::RoofPlane, PlanView::Tool::JoinPlanes});
     roofs->addActions({roof, plane, join});
     roofs->addSeparator();
-    roofs->addAction(autoRoofAction);
+    roofs->addSeparator();
+    roofs->addActions({autoRoofAction, toGable, toHip});
     QMenu* framing = category("Framing", {PlanView::Tool::Beam, PlanView::Tool::Post, PlanView::Tool::Floor});
     framing->addActions({beam, post, floor});
     QMenu* dims = category("Dimensions", {PlanView::Tool::Dimension});
@@ -519,31 +533,100 @@ void MainWindow::openObject() {
     }
 }
 
-void MainWindow::autoRoof() {
-    const ObjectId level = ws_->currentLevel();
-    Rect box{{1e30, 1e30}, {-1e30, -1e30}};
-    bool any = false;
-    for (const auto& w : ws_->doc().walls) {
-        if (w.levelId != level || !w.bearing) continue;
-        for (Vec2 p : {w.a, w.b}) {
-            box.min = {std::min(box.min.x, p.x), std::min(box.min.y, p.y)};
-            box.max = {std::max(box.max.x, p.x), std::max(box.max.y, p.y)};
-        }
-        any = true;
-    }
-    if (!any || box.width() < 12 || box.height() < 12) {
-        statusBar()->showMessage("Draw bearing walls on this level first.");
+void MainWindow::setWallRoof(WallRoof kind) {
+    std::vector<ObjectId> walls;
+    for (ObjectId id : ws_->selectedIds())
+        if (ws_->doc().wall(id)) walls.push_back(id);
+    if (walls.empty()) {
+        statusBar()->showMessage("Select the walls first (Shift-click or Shift-drag to pick several).");
         return;
     }
-    ObjectId created = kNoId;
-    ws_->edit("Add roof", [&](Document& d) {
-        Roof r;
-        r.id = d.newId();
-        r.levelId = level;
-        r.footprint = box;
-        r.ridgeAxis = box.width() >= box.height() ? Axis::X : Axis::Y;
-        d.roofs.push_back(r);
-        created = r.id;
+    ws_->edit(kind == WallRoof::FullGable ? "Change to gable walls" : "Change to hip walls", [&](Document& d) {
+        for (ObjectId id : walls) d.wall(id)->roof.kind = kind;
     });
-    ws_->select(created);
+    statusBar()->showMessage(ws_->doc().roofDefaults.autoRebuild ? "The roof was rebuilt."
+                                                                 : "Use Build roof to rebuild the roof.");
+}
+
+// Chief's Build Roof dialog: the defaults the walls fall back on, and
+// building the roof from them.
+void MainWindow::buildRoofDialog() {
+    const RoofDefaults current = ws_->doc().roofDefaults;
+    QDialog dialog(this);
+    dialog.setWindowTitle("Build roof");
+    auto* form = new QFormLayout(&dialog);
+    auto* pitch = new QDoubleSpinBox;
+    pitch->setRange(0.25, 24);
+    pitch->setDecimals(2);
+    pitch->setSingleStep(0.5);
+    pitch->setSuffix(" in 12");
+    pitch->setValue(current.pitch);
+    auto* eave = new QLineEdit(QString::fromStdString(formatFeetInches(current.eaveOverhang, 8)));
+    auto* gable = new QLineEdit(QString::fromStdString(formatFeetInches(current.gableOverhang, 8)));
+    auto* framing = new QComboBox;
+    framing->addItems({"Rafters (stick framed)", "Manufactured trusses"});
+    framing->setCurrentIndex(current.framing == RoofFraming::Trusses ? 1 : 0);
+    auto* ceiling = new QCheckBox("Flat ceiling under the roof");
+    ceiling->setChecked(current.ceiling);
+    auto* build = new QCheckBox("Build roof planes now");
+    build->setChecked(true);
+    auto* autoRebuild = new QCheckBox("Rebuild automatically when walls change");
+    autoRebuild->setChecked(current.autoRebuild);
+    form->addRow("Pitch", pitch);
+    form->addRow("Eave overhang", eave);
+    form->addRow("Gable overhang", gable);
+    form->addRow("Framing", framing);
+    form->addRow(ceiling);
+    form->addRow(build);
+    form->addRow(autoRebuild);
+    auto* hint = new QLabel("Walls build a sloped plane unless they are set to Full gable or High shed in their "
+                            "properties. Each wall can have its own pitch and overhang.");
+    hint->setWordWrap(true);
+    hint->setStyleSheet("color: #666");
+    form->addRow(hint);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    RoofDefaults next = current;
+    next.pitch = pitch->value();
+    if (auto v = parseLength(eave->text().toStdString()); v && *v >= 0) next.eaveOverhang = *v;
+    if (auto v = parseLength(gable->text().toStdString()); v && *v >= 0) next.gableOverhang = *v;
+    next.framing = framing->currentIndex() == 1 ? RoofFraming::Trusses : RoofFraming::Rafters;
+    next.ceiling = ceiling->isChecked();
+    next.autoRebuild = autoRebuild->isChecked();
+
+    // The roof goes over this level's exterior walls, or the highest level
+    // whose exterior walls close.
+    ObjectId level = ws_->currentLevel();
+    if (exteriorWallLoop(ws_->doc(), level).empty()) {
+        auto levels = ws_->doc().levelsByElevation();
+        for (auto it = levels.rbegin(); it != levels.rend(); ++it)
+            if (!exteriorWallLoop(ws_->doc(), (*it)->id).empty()) {
+                level = (*it)->id;
+                break;
+            }
+    }
+    const bool building = build->isChecked() || (next.autoRebuild && !current.autoRebuild);
+    int planes = 0;
+    ws_->edit(building ? "Build roof" : "Change roof defaults", [&](Document& d) {
+        d.roofDefaults = next;
+        if (!building) return;
+        planes = buildRoof(d, level);
+        // Planes built from the walls take the place of a rectangular roof there.
+        if (planes > 0) std::erase_if(d.roofs, [&](const Roof& r) { return r.levelId == level; });
+    });
+    if (!building) {
+        statusBar()->showMessage("Roof defaults saved. New roof planes use them.");
+    } else if (planes == 0) {
+        statusBar()->showMessage("No roof built: draw exterior walls that close a loop first.");
+    } else {
+        const Level* l = ws_->doc().level(level);
+        statusBar()->showMessage(QString("Built %1 roof planes over the walls of %2.")
+                                     .arg(planes)
+                                     .arg(l ? QString::fromStdString(l->name) : QString("this level")));
+        tabs_->setCurrentWidget(model_);
+    }
 }
