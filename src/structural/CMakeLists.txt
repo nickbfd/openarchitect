@@ -4,6 +4,7 @@ add_library(oa_structural
     src/beam_analysis.cpp
     src/members.cpp
     src/sizing.cpp
+    src/posts.cpp
     src/takedown.cpp
 )
 add_library(oa::structural ALIAS oa_structural)

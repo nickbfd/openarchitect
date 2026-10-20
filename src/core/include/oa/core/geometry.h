@@ -1,7 +1,9 @@
 #pragma once
 
+#include <array>
 #include <cmath>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace oa {
@@ -74,6 +76,27 @@ double signedArea(const Polygon& poly);
 inline double area(const Polygon& poly) { return std::abs(signedArea(poly)); }
 Vec2 centroid(const Polygon& poly);
 bool contains(const Polygon& poly, Vec2 p);
+// Splits a simple polygon (either winding) into triangles by ear clipping,
+// as index triples into `poly`.
+std::vector<std::array<int, 3>> triangulate(const Polygon& poly);
+// Moves edge `edge` (from vertex edge to edge + 1) of a polygon parallel to
+// itself by `offset` along its left normal, keeping the directions of the
+// two neighboring edges, the way a drafter stretches one side of a shape.
+Polygon moveEdge(const Polygon& poly, int edge, double offset);
+// Replaces edge `edge` of a polygon with the line through `p` along `dir`,
+// sliding its ends along the neighboring edges. Empty if a neighbor is
+// parallel to the line.
+Polygon replaceEdge(const Polygon& poly, int edge, Vec2 p, Vec2 dir);
+
+// The parts of a segment inside a polygon, as parameter ranges 0..1 along it.
+std::vector<std::pair<double, double>> clipToPolygon(const Segment& s, const Polygon& poly);
+// The point where segments cross, as parameters along each, if they do
+// (ends included, within `tolerance` inches).
+struct Crossing {
+    double t = 0.0; // along the first
+    double u = 0.0; // along the second
+};
+std::optional<Crossing> segmentCrossing(const Segment& s1, const Segment& s2, double tolerance = kEps);
 
 struct Rect {
     Vec2 min, max;

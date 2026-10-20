@@ -2,9 +2,11 @@
 
 #include "oa/core/units.h"
 #include "oa/structural/members.h"
+#include "oa/structural/posts.h"
 #include "oa/structural/snow.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <map>
 #include <sstream>
@@ -50,6 +52,7 @@ public:
 
     TakedownResult run() {
         createSupports();
+        for (const auto& p : doc_.posts) result_.posts.push_back({p.id, p.levelId, {}, {}});
         for (const auto& roof : doc_.roofs) applyRoof(roof);
         for (const auto& plane : doc_.roofPlanes) applyRoofPlane(plane);
         for (const auto& p : doc_.platforms) applyPlatform(p);
@@ -57,6 +60,7 @@ public:
         auto levels = doc_.levelsByElevation();
         for (auto it = levels.rbegin(); it != levels.rend(); ++it) {
             processBeams((*it)->id);
+            processPosts((*it)->id);
             processWalls((*it)->id);
         }
         return std::move(result_);
@@ -248,38 +252,176 @@ private:
         }
     }
 
-    // A single plane: rafters or mono trusses span from the eave bearing line
-    // up to the high bearing line, with the overhang cantilevered past the eave.
+    // A single plane of any outline. Rafters (or mono trusses) run straight
+    // uphill from the baseline, so the plane is cut into strips across the
+    // baseline and each strip is a rafter: from `lo` (negative in the eave
+    // overhang) up to `hi`. With a ridge board the eave takes the whole strip;
+    // with the high side on a wall or beam, the rafter is a simple span from
+    // the baseline to there with the overhang cantilevered.
     void applyRoofPlane(const RoofPlane& plane) {
-        const double run = plane.run;
-        if (run < 1.0 || plane.eaveLength() < 1.0) return;
+        const Polygon& poly = plane.outline;
+        if (poly.size() < 3 || plane.width() < 1.0) return;
         const double theta = plane.slopeRadians();
         const CaseLoads psf = CaseLoads::of(plane.deadPsf / std::cos(theta), 0.0, kRoofLivePsf,
                                             designSnowPsf(doc_.site, plane));
+        const CaseLoads ceiling = CaseLoads::of(plane.ceilingDeadPsf, plane.atticLivePsf);
         const std::string name = "Roof plane " + std::to_string(plane.id);
         const auto targets = supportsOn(plane.levelId);
-        const double o = plane.overhang;
-        const double len = plane.eaveLength();
 
-        const double eaveDepth = (run + o) * (run + o) / (2.0 * run);
-        double highDepth = (run * run - o * o) / (2.0 * run);
-        if (highDepth < 0.0) {
-            warn(name + ": the overhang is longer than the run, so the high side would lift up. "
-                        "Uplift is not modeled; the high side gets no load.");
-            highDepth = 0.0;
+        // Uphill extent of the outline across the baseline position t.
+        auto extent = [&](double t, double& lo, double& hi) {
+            lo = 1e30;
+            hi = -1e30;
+            for (size_t k = 0; k < poly.size(); ++k) {
+                const Vec2 p = poly[k], q = poly[(k + 1) % poly.size()];
+                const double tp = plane.alongFrom(p), tq = plane.alongFrom(q);
+                const double sp = plane.upFrom(p), sq = plane.upFrom(q);
+                if (std::abs(tq - tp) < 1e-9) {
+                    if (std::abs(t - tp) < 1e-6) {
+                        lo = std::min({lo, sp, sq});
+                        hi = std::max({hi, sp, sq});
+                    }
+                    continue;
+                }
+                const double f = (t - tp) / (tq - tp);
+                if (f < -1e-9 || f > 1 + 1e-9) continue;
+                const double v = sp + (sq - sp) * f;
+                lo = std::min(lo, v);
+                hi = std::max(hi, v);
+            }
+            return hi > lo;
+        };
+        bool uplift = false;
+        // Plf on the eave and on the high side per unit of baseline length,
+        // roof and ceiling apart.
+        struct Strip {
+            CaseLoads eave, eaveCeiling, high, highCeiling;
+        };
+        auto strip = [&](double t) {
+            Strip out;
+            double lo, hi;
+            if (!extent(t, lo, hi)) return out;
+            if (hi <= 0.0) { // all overhang, hanging off the eave
+                out.eave = psf * ((hi - lo) / 12.0);
+                return out;
+            }
+            const double run = hi, o = std::max(-lo, -run);
+            if (!plane.highBearing) {
+                out.eave = psf * ((run + o) / 12.0);
+                if (plane.hasCeiling) out.eaveCeiling = ceiling * (run / 12.0);
+                return out;
+            }
+            double highDepth = (run * run - o * o) / (2.0 * run);
+            if (highDepth < 0.0) {
+                uplift = true;
+                highDepth = 0.0;
+            }
+            out.eave = psf * ((run + o) * (run + o) / (2.0 * run) / 12.0);
+            out.high = psf * (highDepth / 12.0);
+            if (plane.hasCeiling) out.eaveCeiling = out.highCeiling = ceiling * (run / 2.0 / 12.0);
+            return out;
+        };
+
+        std::vector<double> breaks;
+        for (Vec2 p : poly) breaks.push_back(plane.alongFrom(p));
+        std::sort(breaks.begin(), breaks.end());
+        breaks.erase(std::unique(breaks.begin(), breaks.end(), [](double x, double y) { return y - x < 1e-6; }),
+                     breaks.end());
+        const double t0 = breaks.front(), t1 = breaks.back();
+        const Vec2 along = plane.along(), up = plane.upslope();
+        auto baselineAt = [&](double t) { return plane.a + along * t; };
+
+        // The bearing runs the length of the baseline. Rake overhangs past its
+        // ends cantilever off the end of the eave and high supports, so their
+        // load lands there as a point load.
+        double e0 = std::max(t0, 0.0), e1 = std::min(t1, distance(plane.a, plane.b));
+        if (e1 - e0 < 1.0) {
+            e0 = t0;
+            e1 = t1;
         }
-        const CaseLoads eave = psf * (eaveDepth / 12.0);
-        const CaseLoads high = psf * (highDepth / 12.0);
-        std::vector<LineLoad> eaveLoads = {{0.0, len, eave, eave, name, LoadOrigin::Roof}};
-        std::vector<LineLoad> highLoads;
-        if (highDepth > 0.0) highLoads.push_back({0.0, len, high, high, name, LoadOrigin::Roof});
-        if (plane.hasCeiling) {
-            const CaseLoads c = CaseLoads::of(plane.ceilingDeadPsf, plane.atticLivePsf) * (run / 2.0 / 12.0);
-            eaveLoads.push_back({0.0, len, c, c, name + " ceiling", LoadOrigin::Ceiling});
-            highLoads.push_back({0.0, len, c, c, name + " ceiling", LoadOrigin::Ceiling});
+        for (double t : {e0, e1})
+            if (t > t0 + 1e-6 && t < t1 - 1e-6) breaks.push_back(t);
+        std::sort(breaks.begin(), breaks.end());
+        struct Rake {
+            CaseLoads eave, high;
+        };
+        std::array<Rake, 2> rakes; // before e0, after e1
+
+        std::vector<LineLoad> eaveLoads;
+        double highGaps = 0.0;
+        for (size_t k = 0; k + 1 < breaks.size(); ++k) {
+            const double ta = breaks[k], tb = breaks[k + 1];
+            const int pieces = std::max(1, static_cast<int>(std::ceil((tb - ta) / 12.0)));
+            const double eps = std::min(1e-4, (tb - ta) * 1e-3);
+            double loA, hiA, loB, hiB;
+            extent(ta + eps, loA, hiA);
+            extent(tb - eps, loB, hiB);
+            // The high side over this stretch is one straight edge of the outline.
+            const Segment highEdge{baselineAt(ta) + up * hiA, baselineAt(tb) + up * hiB};
+            const double edgeLen = highEdge.length();
+            std::vector<LineLoad> highLoads;
+            const bool outside = tb <= e0 + 1e-6 || ta >= e1 - 1e-6;
+            for (int n = 0; n < pieces; ++n) {
+                const double sa = ta + (tb - ta) * n / pieces, sb = ta + (tb - ta) * (n + 1) / pieces;
+                const Strip A = strip(std::max(sa, ta + eps)), B = strip(std::min(sb, tb - eps));
+                if (outside) {
+                    Rake& r = rakes[ta >= e1 - 1e-6 ? 1 : 0];
+                    const double w = (sb - sa) / 2.0 / 12.0; // average plf times length, in feet
+                    r.eave += (A.eave + B.eave + A.eaveCeiling + B.eaveCeiling) * w;
+                    r.high += (A.high + B.high + A.highCeiling + B.highCeiling) * w;
+                    continue;
+                }
+                auto addEave = [&](const CaseLoads& wa, const CaseLoads& wb, const std::string& src, LoadOrigin origin) {
+                    if (!wa.isZero() || !wb.isZero()) eaveLoads.push_back({sa - t0, sb - t0, wa, wb, src, origin});
+                };
+                addEave(A.eave, B.eave, name, LoadOrigin::Roof);
+                addEave(A.eaveCeiling, B.eaveCeiling, name + " ceiling", LoadOrigin::Ceiling);
+                if (edgeLen < 1e-6) continue;
+                // Spread over the high edge's own length, which may run on a slant.
+                const double scale = (tb - ta) / edgeLen;
+                const double pa = (sa - ta) / (tb - ta) * edgeLen, pb = (sb - ta) / (tb - ta) * edgeLen;
+                auto addHigh = [&](const CaseLoads& wa, const CaseLoads& wb, const std::string& src, LoadOrigin origin) {
+                    if (!wa.isZero() || !wb.isZero()) highLoads.push_back({pa, pb, wa * scale, wb * scale, src, origin});
+                };
+                addHigh(A.high, B.high, name, LoadOrigin::Roof);
+                addHigh(A.highCeiling, B.highCeiling, name + " ceiling", LoadOrigin::Ceiling);
+            }
+            if (!highLoads.empty())
+                for (const auto& gap : transfer(highEdge, highLoads, {}, roofTargets(targets), kRoofEdgeTolerance, name))
+                    highGaps += gap.hi - gap.lo;
         }
-        applyEdge(plane.eaveLine(), eaveLoads, targets, name, "eave");
-        if (!highLoads.empty()) applyEdge(plane.highLine(), highLoads, targets, name, "high side");
+        for (auto& l : eaveLoads) {
+            l.start -= e0 - t0;
+            l.end -= e0 - t0;
+        }
+        std::vector<PointLoad> rakePoints;
+        for (int side = 0; side < 2; ++side) {
+            const double at = side == 0 ? e0 : e1;
+            if (!rakes[side].eave.isZero())
+                rakePoints.push_back({at - e0, rakes[side].eave, name + " rake overhang", LoadOrigin::Roof});
+            if (rakes[side].high.isZero()) continue;
+            double lo, hi;
+            extent(std::clamp(side == 0 ? at + 1e-4 : at - 1e-4, t0, t1), lo, hi);
+            const PointLoad p{0.0, rakes[side].high, name + " rake overhang", LoadOrigin::Roof};
+            if (!placePointLoad(baselineAt(at) + up * hi, p, roofTargets(targets)))
+                warn(name + ": the rake overhang at the high side has no wall, beam or post corner beneath it.");
+        }
+        const Segment eaveEdge{baselineAt(e0), baselineAt(e1)};
+        for (const auto& gap : transfer(eaveEdge, eaveLoads, rakePoints, roofTargets(targets), kRoofEdgeTolerance, name))
+            warn(name + ": " + feetText(gap.hi - gap.lo) + " of eave has no bearing wall or beam beneath it.");
+        if (highGaps > 1.5)
+            warn(name + ": " + feetText(highGaps) + " of high side has no bearing wall or beam beneath it. If it leans "
+                        "on another roof plane, set its high side to a ridge.");
+        if (uplift)
+            warn(name + ": the overhang is longer than the run in places, so the high side would lift up. "
+                        "Uplift is not modeled; that part of the high side gets no load.");
+    }
+
+    std::vector<size_t> roofTargets(const std::vector<size_t>& targets) {
+        std::vector<size_t> out;
+        for (size_t i : targets)
+            if (supports()[i].kind != SupportKind::RidgeBeam) out.push_back(i);
+        return out;
     }
 
     void applyEdge(const Segment& edge, const std::vector<LineLoad>& profile, const std::vector<size_t>& targets,
@@ -403,7 +545,32 @@ private:
     struct EndSupport {
         Vec2 point;
         long target = -1; // support index on the same level, or -1
+        long post = -1;   // index into result_.posts, or -1
     };
+
+    // The post on a level standing under a point, as an index into result_.posts.
+    long postUnder(Vec2 point, ObjectId levelId) const {
+        for (size_t i = 0; i < doc_.posts.size(); ++i) {
+            const Post& p = doc_.posts[i];
+            if (p.levelId != levelId) continue;
+            const PostMember* m = findPost(p.memberId);
+            const double half = m ? std::max(m->b, m->d) / 2.0 : 1.75;
+            if (distance(p.position, point) <= half + kBearingTolerance) return static_cast<long>(i);
+        }
+        return -1;
+    }
+
+    void processPosts(ObjectId levelId) {
+        const Level* below = doc_.levelBelow(levelId);
+        for (size_t i = 0; i < doc_.posts.size(); ++i) {
+            const Post& post = doc_.posts[i];
+            PostLoads& carried = result_.posts[i];
+            if (post.levelId != levelId || carried.load.isZero() || !below) continue; // the foundation takes it
+            PointLoad p{0.0, carried.load, "Post " + std::to_string(post.id), LoadOrigin::Beam};
+            if (!placePointLoad(post.position, p, supportsOn(below->id)))
+                warn("Post " + std::to_string(post.id) + ": nothing beneath it on " + below->name + " carries its load.");
+        }
+    }
 
     void processBeams(ObjectId levelId) {
         std::vector<size_t> beams, walls;
@@ -424,6 +591,8 @@ private:
                     }
                 }
                 if (end.target >= 0) continue;
+                end.post = postUnder(end.point, levelId);
+                if (end.post >= 0) continue;
                 for (size_t other : beams) {
                     if (other == b) continue;
                     const Segment& ol = supports()[other].line;
@@ -486,7 +655,14 @@ private:
                 t.pointLoads.push_back(std::move(p));
                 continue;
             }
-            // No wall at this end: a post carries it to whatever is below.
+            if (ends[i].post >= 0) {
+                PostLoads& post = result_.posts[static_cast<size_t>(ends[i].post)];
+                post.load += reaction[i];
+                post.sources.push_back(label);
+                continue;
+            }
+            // Nothing drawn at this end: assume a post carries it straight down.
+            warn(label + ": one end has no wall or post under it. Add a post there; its load was taken straight down.");
             const Level* below = doc_.levelBelow(levelId);
             if (!below) continue; // post to the foundation
             if (!placePointLoad(ends[i].point, p, supportsOn(below->id)))
@@ -543,6 +719,12 @@ LineLoadSummary SupportLoads::bottomLoads() const {
     std::vector<LineLoad> all = lineLoads;
     if (selfWeight.length() > 0.0) all.push_back(selfWeight);
     return summarize(all);
+}
+
+const PostLoads* TakedownResult::post(ObjectId id) const {
+    for (const auto& p : posts)
+        if (p.postId == id) return &p;
+    return nullptr;
 }
 
 const SupportLoads* TakedownResult::find(SupportKind kind, ObjectId objectId) const {

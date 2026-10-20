@@ -38,3 +38,44 @@ TEST_CASE("segment projection") {
     CHECK(s.distanceTo({5, 3}) == Approx(3));
     CHECK(s.distanceTo({-4, 3}) == Approx(5));
 }
+
+TEST_CASE("triangulating a concave outline covers its area") {
+    const Polygon ell{{0, 0}, {200, 0}, {200, 100}, {100, 100}, {100, 200}, {0, 200}};
+    const auto tris = triangulate(ell);
+    REQUIRE(tris.size() == 4);
+    double sum = 0;
+    for (const auto& t : tris) sum += area(Polygon{ell[t[0]], ell[t[1]], ell[t[2]]});
+    CHECK(sum == Approx(area(ell)));
+    // Clockwise input works too.
+    const Polygon cw(ell.rbegin(), ell.rend());
+    CHECK(triangulate(cw).size() == 4);
+}
+
+TEST_CASE("moving one edge of an outline keeps its neighbors' directions") {
+    const Polygon square{{0, 0}, {100, 0}, {100, 100}, {0, 100}};
+    // Edge 1 runs up the right side; its left normal points into the square.
+    const Polygon narrower = moveEdge(square, 1, 20);
+    CHECK(narrower[1] == Vec2{80, 0});
+    CHECK(narrower[2] == Vec2{80, 100});
+    CHECK(narrower[0] == Vec2{0, 0});
+
+    // Replacing it with a slanted line makes a trapezoid.
+    const Polygon slanted = replaceEdge(square, 1, {100, 0}, {-1, 1});
+    REQUIRE(slanted.size() == 4);
+    CHECK(slanted[2].x == Approx(0));
+    CHECK(slanted[2].y == Approx(100));
+    // A line parallel to a neighbor can't meet it.
+    CHECK(replaceEdge(square, 1, {50, 0}, {1, 0}).empty());
+}
+
+TEST_CASE("segments crossing and a segment clipped to an outline") {
+    const auto x = segmentCrossing({{0, 0}, {100, 0}}, {{50, -10}, {50, 10}});
+    REQUIRE(x);
+    CHECK(x->t == Approx(0.5));
+    CHECK(x->u == Approx(0.5));
+    CHECK_FALSE(segmentCrossing({{0, 0}, {100, 0}}, {{150, -10}, {150, 10}}));
+    const auto inside = clipToPolygon({{-50, 50}, {150, 50}}, {{0, 0}, {100, 0}, {100, 100}, {0, 100}});
+    REQUIRE(inside.size() == 1);
+    CHECK(inside[0].first == Approx(0.25));
+    CHECK(inside[0].second == Approx(0.75));
+}
