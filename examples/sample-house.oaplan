@@ -28,6 +28,386 @@
         "memberId": "dfl-no2-1-4x10"
       }
     ],
+    "dimensions": [
+      {
+        "a": [
+          0.0,
+          0.0
+        ],
+        "automatic": true,
+        "b": [
+          96.0,
+          0.0
+        ],
+        "id": 58,
+        "levelId": 6,
+        "offset": -99.0
+      },
+      {
+        "a": [
+          96.0,
+          0.0
+        ],
+        "automatic": true,
+        "b": [
+          240.0,
+          0.0
+        ],
+        "id": 59,
+        "levelId": 6,
+        "offset": -99.0
+      },
+      {
+        "a": [
+          240.0,
+          0.0
+        ],
+        "automatic": true,
+        "b": [
+          384.0,
+          0.0
+        ],
+        "id": 60,
+        "levelId": 6,
+        "offset": -99.0
+      },
+      {
+        "a": [
+          384.0,
+          0.0
+        ],
+        "automatic": true,
+        "b": [
+          480.0,
+          0.0
+        ],
+        "id": 61,
+        "levelId": 6,
+        "offset": -99.0
+      },
+      {
+        "a": [
+          0.0,
+          0.0
+        ],
+        "automatic": true,
+        "b": [
+          480.0,
+          0.0
+        ],
+        "id": 62,
+        "levelId": 6,
+        "offset": -123.0
+      },
+      {
+        "a": [
+          480.0,
+          0.0
+        ],
+        "automatic": true,
+        "b": [
+          480.0,
+          84.0
+        ],
+        "id": 63,
+        "levelId": 6,
+        "offset": -27.59375
+      },
+      {
+        "a": [
+          480.0,
+          84.0
+        ],
+        "automatic": true,
+        "b": [
+          480.0,
+          336.0
+        ],
+        "id": 64,
+        "levelId": 6,
+        "offset": -27.59375
+      },
+      {
+        "a": [
+          480.0,
+          0.0
+        ],
+        "automatic": true,
+        "b": [
+          480.0,
+          336.0
+        ],
+        "id": 65,
+        "levelId": 6,
+        "offset": -51.59375
+      },
+      {
+        "a": [
+          0.0,
+          336.0
+        ],
+        "automatic": true,
+        "b": [
+          120.0,
+          336.0
+        ],
+        "id": 66,
+        "levelId": 6,
+        "offset": 27.59375
+      },
+      {
+        "a": [
+          120.0,
+          336.0
+        ],
+        "automatic": true,
+        "b": [
+          336.0,
+          336.0
+        ],
+        "id": 67,
+        "levelId": 6,
+        "offset": 27.59375
+      },
+      {
+        "a": [
+          336.0,
+          336.0
+        ],
+        "automatic": true,
+        "b": [
+          480.0,
+          336.0
+        ],
+        "id": 68,
+        "levelId": 6,
+        "offset": 27.59375
+      },
+      {
+        "a": [
+          0.0,
+          336.0
+        ],
+        "automatic": true,
+        "b": [
+          480.0,
+          336.0
+        ],
+        "id": 69,
+        "levelId": 6,
+        "offset": 51.59375
+      },
+      {
+        "a": [
+          0.0,
+          0.0
+        ],
+        "automatic": true,
+        "b": [
+          0.0,
+          252.0
+        ],
+        "id": 70,
+        "levelId": 6,
+        "offset": 27.59375
+      },
+      {
+        "a": [
+          0.0,
+          252.0
+        ],
+        "automatic": true,
+        "b": [
+          0.0,
+          336.0
+        ],
+        "id": 71,
+        "levelId": 6,
+        "offset": 27.59375
+      },
+      {
+        "a": [
+          0.0,
+          0.0
+        ],
+        "automatic": true,
+        "b": [
+          0.0,
+          336.0
+        ],
+        "id": 72,
+        "levelId": 6,
+        "offset": 51.59375
+      },
+      {
+        "a": [
+          0.0,
+          0.0
+        ],
+        "automatic": true,
+        "b": [
+          96.0,
+          0.0
+        ],
+        "id": 73,
+        "levelId": 7,
+        "offset": -27.59375
+      },
+      {
+        "a": [
+          96.0,
+          0.0
+        ],
+        "automatic": true,
+        "b": [
+          384.0,
+          0.0
+        ],
+        "id": 74,
+        "levelId": 7,
+        "offset": -27.59375
+      },
+      {
+        "a": [
+          384.0,
+          0.0
+        ],
+        "automatic": true,
+        "b": [
+          480.0,
+          0.0
+        ],
+        "id": 75,
+        "levelId": 7,
+        "offset": -27.59375
+      },
+      {
+        "a": [
+          0.0,
+          0.0
+        ],
+        "automatic": true,
+        "b": [
+          480.0,
+          0.0
+        ],
+        "id": 76,
+        "levelId": 7,
+        "offset": -51.59375
+      },
+      {
+        "a": [
+          480.0,
+          0.0
+        ],
+        "automatic": true,
+        "b": [
+          480.0,
+          168.0
+        ],
+        "id": 77,
+        "levelId": 7,
+        "offset": -27.59375
+      },
+      {
+        "a": [
+          480.0,
+          168.0
+        ],
+        "automatic": true,
+        "b": [
+          480.0,
+          336.0
+        ],
+        "id": 78,
+        "levelId": 7,
+        "offset": -27.59375
+      },
+      {
+        "a": [
+          480.0,
+          0.0
+        ],
+        "automatic": true,
+        "b": [
+          480.0,
+          336.0
+        ],
+        "id": 79,
+        "levelId": 7,
+        "offset": -51.59375
+      },
+      {
+        "a": [
+          0.0,
+          336.0
+        ],
+        "automatic": true,
+        "b": [
+          120.0,
+          336.0
+        ],
+        "id": 80,
+        "levelId": 7,
+        "offset": 27.59375
+      },
+      {
+        "a": [
+          120.0,
+          336.0
+        ],
+        "automatic": true,
+        "b": [
+          360.0,
+          336.0
+        ],
+        "id": 81,
+        "levelId": 7,
+        "offset": 27.59375
+      },
+      {
+        "a": [
+          360.0,
+          336.0
+        ],
+        "automatic": true,
+        "b": [
+          480.0,
+          336.0
+        ],
+        "id": 82,
+        "levelId": 7,
+        "offset": 27.59375
+      },
+      {
+        "a": [
+          0.0,
+          336.0
+        ],
+        "automatic": true,
+        "b": [
+          480.0,
+          336.0
+        ],
+        "id": 83,
+        "levelId": 7,
+        "offset": 51.59375
+      },
+      {
+        "a": [
+          0.0,
+          0.0
+        ],
+        "automatic": true,
+        "b": [
+          0.0,
+          336.0
+        ],
+        "id": 84,
+        "levelId": 7,
+        "offset": 27.59375
+      }
+    ],
     "levels": [
       {
         "elevation": 0.0,
@@ -45,7 +425,7 @@
       }
     ],
     "name": "Sample house",
-    "nextId": 49,
+    "nextId": 85,
     "openings": [
       {
         "headerMemberId": "",
@@ -282,6 +662,17 @@
     ],
     "rooms": [
       {
+        "floor": {
+          "customJoistAxis": false,
+          "deadPsf": 10.0,
+          "drop": 0.0,
+          "joistAxis": "y",
+          "joists": "2x10 @ 16\" o.c.",
+          "kind": "levelFraming",
+          "livePsf": 0.0,
+          "slabNote": "3000 psi concrete on 4\" compacted gravel",
+          "slabThickness": 4.0
+        },
         "id": 24,
         "levelId": 6,
         "name": "Kitchen",
@@ -306,6 +697,17 @@
         "type": "kitchen"
       },
       {
+        "floor": {
+          "customJoistAxis": false,
+          "deadPsf": 10.0,
+          "drop": 4.0,
+          "joistAxis": "y",
+          "joists": "2x10 @ 16\" o.c.",
+          "kind": "slab",
+          "livePsf": 0.0,
+          "slabNote": "3000 psi concrete on 4\" compacted gravel",
+          "slabThickness": 4.0
+        },
         "id": 34,
         "levelId": 6,
         "name": "Porch",
@@ -330,6 +732,17 @@
         "type": "deck"
       },
       {
+        "floor": {
+          "customJoistAxis": false,
+          "deadPsf": 10.0,
+          "drop": 0.0,
+          "joistAxis": "y",
+          "joists": "2x10 @ 16\" o.c.",
+          "kind": "levelFraming",
+          "livePsf": 0.0,
+          "slabNote": "3000 psi concrete on 4\" compacted gravel",
+          "slabThickness": 4.0
+        },
         "id": 23,
         "levelId": 6,
         "name": "Living",
@@ -354,6 +767,17 @@
         "type": "living"
       },
       {
+        "floor": {
+          "customJoistAxis": false,
+          "deadPsf": 10.0,
+          "drop": 0.0,
+          "joistAxis": "y",
+          "joists": "2x10 @ 16\" o.c.",
+          "kind": "levelFraming",
+          "livePsf": 0.0,
+          "slabNote": "3000 psi concrete on 4\" compacted gravel",
+          "slabThickness": 4.0
+        },
         "id": 26,
         "levelId": 6,
         "name": "Dining",
@@ -378,6 +802,17 @@
         "type": "living"
       },
       {
+        "floor": {
+          "customJoistAxis": false,
+          "deadPsf": 10.0,
+          "drop": 0.0,
+          "joistAxis": "y",
+          "joists": "2x10 @ 16\" o.c.",
+          "kind": "levelFraming",
+          "livePsf": 0.0,
+          "slabNote": "3000 psi concrete on 4\" compacted gravel",
+          "slabThickness": 4.0
+        },
         "id": 25,
         "levelId": 6,
         "name": "Office",
@@ -402,6 +837,17 @@
         "type": "bedroom"
       },
       {
+        "floor": {
+          "customJoistAxis": false,
+          "deadPsf": 10.0,
+          "drop": 0.0,
+          "joistAxis": "y",
+          "joists": "2x10 @ 16\" o.c.",
+          "kind": "levelFraming",
+          "livePsf": 0.0,
+          "slabNote": "3000 psi concrete on 4\" compacted gravel",
+          "slabThickness": 4.0
+        },
         "id": 45,
         "levelId": 7,
         "name": "Bedroom 1",
@@ -426,6 +872,17 @@
         "type": "bedroom"
       },
       {
+        "floor": {
+          "customJoistAxis": false,
+          "deadPsf": 10.0,
+          "drop": 0.0,
+          "joistAxis": "y",
+          "joists": "2x10 @ 16\" o.c.",
+          "kind": "levelFraming",
+          "livePsf": 0.0,
+          "slabNote": "3000 psi concrete on 4\" compacted gravel",
+          "slabThickness": 4.0
+        },
         "id": 46,
         "levelId": 7,
         "name": "Bedroom 2",
@@ -455,6 +912,83 @@
       "groundSnowPsf": 30.0,
       "importanceIs": 1.0,
       "thermalCt": 1.1
+    },
+    "terrain": {
+      "contourInterval": 12.0,
+      "points": [
+        {
+          "elevation": -6.0,
+          "id": 49,
+          "position": [
+            -180.0,
+            516.0
+          ]
+        },
+        {
+          "elevation": -4.0,
+          "id": 50,
+          "position": [
+            240.0,
+            516.0
+          ]
+        },
+        {
+          "elevation": -8.0,
+          "id": 51,
+          "position": [
+            660.0,
+            516.0
+          ]
+        },
+        {
+          "elevation": -8.0,
+          "id": 52,
+          "position": [
+            -180.0,
+            168.0
+          ]
+        },
+        {
+          "elevation": -10.0,
+          "id": 53,
+          "position": [
+            660.0,
+            168.0
+          ]
+        },
+        {
+          "elevation": -30.0,
+          "id": 54,
+          "position": [
+            -180.0,
+            -240.0
+          ]
+        },
+        {
+          "elevation": -36.0,
+          "id": 55,
+          "position": [
+            240.0,
+            -240.0
+          ]
+        },
+        {
+          "elevation": -40.0,
+          "id": 56,
+          "position": [
+            660.0,
+            -240.0
+          ]
+        },
+        {
+          "elevation": -10.0,
+          "id": 57,
+          "position": [
+            96.0,
+            -120.0
+          ]
+        }
+      ]
     },
     "wallTypes": [
       {

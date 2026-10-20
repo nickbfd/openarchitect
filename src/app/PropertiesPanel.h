@@ -47,6 +47,10 @@ private:
     void showWallType(const oa::Wall& w, const oa::WallType& t);
     void showPlatform(const oa::FloorPlatform& f);
     void showRoom(const oa::Room& r);
+    void showRoomFloor(const oa::Room& r);
+    void showDimension(const oa::Dimension& dim);
+    void showElevationPoint(const oa::ElevationPoint& e);
+    void showTerrain();
     void showLoadBreakdown(oa::ObjectId id);
 
     void apply(const QString& what, std::function<void(oa::Document&)> change);

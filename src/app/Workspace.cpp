@@ -98,6 +98,8 @@ QString Workspace::describe(oa::ObjectId id) const {
     if (const oa::WallType* t = d.wallType(id)) return QString::fromStdString(t->name);
     if (d.roof(id)) return QString("Roof %1").arg(id);
     if (d.roofPlane(id)) return QString("Roof plane %1").arg(id);
+    if (d.dimension(id)) return QString("Dimension %1").arg(id);
+    if (d.elevationPoint(id)) return QString("Elevation point %1").arg(id);
     if (oa::Document::findIn(d.platforms, id)) return QString("Floor framing %1").arg(id);
     if (const oa::Room* r = oa::Document::findIn(d.rooms, id))
         return QString("Room \"%1\"").arg(QString::fromStdString(r->name));

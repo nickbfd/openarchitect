@@ -14,6 +14,7 @@
 namespace oa::structural {
 namespace {
 
+constexpr double kConcretePcf = 150.0;      // normal weight concrete
 constexpr double kRoofLivePsf = 20.0;       // IRC R301.6
 constexpr double kRoofEdgeTolerance = 8.0;  // footprint edge to wall centerline, inches
 constexpr double kAreaEdgeTolerance = 8.0;  // floor area edge to support, inches
@@ -56,6 +57,7 @@ public:
         for (const auto& roof : doc_.roofs) applyRoof(roof);
         for (const auto& plane : doc_.roofPlanes) applyRoofPlane(plane);
         for (const auto& p : doc_.platforms) applyPlatform(p);
+        for (const auto& r : doc_.rooms) applyRoomFloor(r);
 
         auto levels = doc_.levelsByElevation();
         for (auto it = levels.rbegin(); it != levels.rend(); ++it) {
@@ -455,18 +457,54 @@ private:
                       "Floor " + std::to_string(p.id) + " (" + levelName(p.levelId) + ")", LoadOrigin::Floor);
     }
 
-    // One-way framing over a rectangle. Joists run along `joistAxis`; the
-    // supports are walls and beams on `supportLevel` running across them,
-    // or only those at the two ends of the span when `endsOnly` (trusses).
+    // A room with its own floor system: its area comes off the level's
+    // framing it sits in, and goes back on as the room's own joists, or as
+    // the weight of a slab on framing. Slabs on the lowest level bear on the
+    // ground and add nothing to the structure.
+    void applyRoomFloor(const Room& r) {
+        if (r.floor.kind == FloorSystemKind::LevelFraming || r.outline.size() < 3) return;
+        const Level* below = doc_.levelBelow(r.levelId);
+        if (!below) return;
+        const Vec2 middle = centroid(r.outline);
+        const FloorPlatform* host = nullptr;
+        for (const auto& p : doc_.platforms)
+            if (p.levelId == r.levelId && p.area.contains(middle)) host = &p;
+        const std::string room = "Room \"" + r.name + "\"";
+        if (host)
+            applyAreaLoad(r.outline, host->joistAxis, CaseLoads::of(host->deadPsf, host->livePsf) * -1.0, below->id,
+                          "Floor " + std::to_string(host->id) + " (" + levelName(r.levelId) + "), less " + room,
+                          LoadOrigin::Floor);
+        const Axis axis = r.floor.customJoistAxis || !host ? r.floor.joistAxis : host->joistAxis;
+        double dead = r.floor.deadPsf;
+        if (r.floor.kind == FloorSystemKind::Slab) dead += kConcretePcf * r.floor.slabThickness / 12.0;
+        applyAreaLoad(r.outline, axis, CaseLoads::of(dead, doc_.roomLivePsf(r)), below->id,
+                      room + " floor (" + levelName(r.levelId) + ")", LoadOrigin::Floor);
+    }
+
+    // One-way framing over a rectangle or any outline. Joists run along
+    // `joistAxis`; the supports are walls and beams on `supportLevel` running
+    // across them, or only those at the two ends of the span when `endsOnly`
+    // (trusses). A negative `psf` takes load back off (a slab room inside
+    // framed floor).
     void applyAreaLoad(const Rect& area, Axis joistAxis, const CaseLoads& psf, ObjectId supportLevel,
                        const std::string& name, LoadOrigin origin, bool endsOnly = false) {
+        applyAreaLoad(area.corners(), joistAxis, psf, supportLevel, name, origin, endsOnly);
+    }
+
+    void applyAreaLoad(const Polygon& area, Axis joistAxis, const CaseLoads& psf, ObjectId supportLevel,
+                       const std::string& name, LoadOrigin origin, bool endsOnly = false) {
+        if (area.size() < 3) return;
         const bool joistsAlongY = joistAxis == Axis::Y;
         auto spanCoord = [&](Vec2 p) { return joistsAlongY ? p.y : p.x; };
         auto crossCoord = [&](Vec2 p) { return joistsAlongY ? p.x : p.y; };
-        const double spanMin = joistsAlongY ? area.min.y : area.min.x;
-        const double spanMax = joistsAlongY ? area.max.y : area.max.x;
-        const double crossMin = joistsAlongY ? area.min.x : area.min.y;
-        const double crossMax = joistsAlongY ? area.max.x : area.max.y;
+        auto point = [&](double cross, double span) { return joistsAlongY ? Vec2{cross, span} : Vec2{span, cross}; };
+        double crossMin = 1e30, crossMax = -1e30, spanLo = 1e30, spanHi = -1e30;
+        for (Vec2 p : area) {
+            crossMin = std::min(crossMin, crossCoord(p));
+            crossMax = std::max(crossMax, crossCoord(p));
+            spanLo = std::min(spanLo, spanCoord(p));
+            spanHi = std::max(spanHi, spanCoord(p));
+        }
 
         struct Candidate {
             size_t index;
@@ -481,9 +519,7 @@ private:
             const double alongCross = std::abs(joistsAlongY ? d.x : d.y);
             if (alongCross < 0.9999) continue; // not perpendicular to the joists
             const double at = spanCoord((s.line.a + s.line.b) * 0.5);
-            if (at < spanMin - kAreaEdgeTolerance || at > spanMax + kAreaEdgeTolerance) continue;
-            if (endsOnly && std::abs(at - spanMin) > kAreaEdgeTolerance && std::abs(at - spanMax) > kAreaEdgeTolerance)
-                continue;
+            if (at < spanLo - kAreaEdgeTolerance || at > spanHi + kAreaEdgeTolerance) continue;
             double lo = std::min(crossCoord(s.line.a), crossCoord(s.line.b));
             double hi = std::max(crossCoord(s.line.a), crossCoord(s.line.b));
             lo = std::max(lo, crossMin);
@@ -493,6 +529,7 @@ private:
         }
 
         std::vector<double> breaks = {crossMin, crossMax};
+        for (Vec2 p : area) breaks.push_back(crossCoord(p));
         for (const auto& c : candidates) {
             breaks.push_back(c.lo);
             breaks.push_back(c.hi);
@@ -501,39 +538,63 @@ private:
         breaks.erase(std::unique(breaks.begin(), breaks.end(),
                                  [](double a, double b) { return std::abs(a - b) < 0.5; }),
                      breaks.end());
+        // Edges that run on a slant change the span along a strip, so keep strips narrow there.
+        const bool rectilinear = [&] {
+            for (size_t i = 0; i < area.size(); ++i) {
+                const Vec2 d = area[(i + 1) % area.size()] - area[i];
+                if (std::abs(d.x) > 1e-6 && std::abs(d.y) > 1e-6) return false;
+            }
+            return true;
+        }();
 
         double unsupported = 0.0;
+        bool cantilever = false;
         for (size_t k = 0; k + 1 < breaks.size(); ++k) {
-            const double x0 = breaks[k], x1 = breaks[k + 1];
-            if (x1 - x0 < 0.5) continue;
-            std::vector<const Candidate*> row;
-            for (const auto& c : candidates)
-                if (c.lo <= x0 + 0.25 && c.hi >= x1 - 0.25) row.push_back(&c);
-            std::sort(row.begin(), row.end(), [](auto* a, auto* b) { return a->at < b->at; });
-            if (row.empty()) {
-                unsupported += x1 - x0;
-                continue;
-            }
-            if (row.size() == 1 && row.front()->at > spanMin + kAreaEdgeTolerance &&
-                row.front()->at < spanMax - kAreaEdgeTolerance)
-                warn(name + ": only one support across part of the framing; it would act as a cantilever.");
+            const int pieces = rectilinear ? 1 : std::max(1, static_cast<int>(std::ceil((breaks[k + 1] - breaks[k]) / 12.0)));
+            for (int piece = 0; piece < pieces; ++piece) {
+                const double x0 = breaks[k] + (breaks[k + 1] - breaks[k]) * piece / pieces;
+                const double x1 = breaks[k] + (breaks[k + 1] - breaks[k]) * (piece + 1) / pieces;
+                if (x1 - x0 < 0.5) continue;
+                const double xm = (x0 + x1) / 2.0;
+                const Segment across{point(xm, spanLo - 1.0), point(xm, spanHi + 1.0)};
+                for (auto [t0, t1] : clipToPolygon(across, area)) {
+                    const double spanMin = spanCoord(lerp(across.a, across.b, t0));
+                    const double spanMax = spanCoord(lerp(across.a, across.b, t1));
+                    if (spanMax - spanMin < 0.5) continue;
+                    std::vector<const Candidate*> row;
+                    for (const auto& c : candidates) {
+                        if (c.lo > x0 + 0.25 || c.hi < x1 - 0.25) continue;
+                        if (c.at < spanMin - kAreaEdgeTolerance || c.at > spanMax + kAreaEdgeTolerance) continue;
+                        if (endsOnly && std::abs(c.at - spanMin) > kAreaEdgeTolerance &&
+                            std::abs(c.at - spanMax) > kAreaEdgeTolerance)
+                            continue;
+                        row.push_back(&c);
+                    }
+                    std::sort(row.begin(), row.end(), [](auto* a, auto* b) { return a->at < b->at; });
+                    if (row.empty()) {
+                        unsupported += x1 - x0;
+                        continue;
+                    }
+                    if (row.size() == 1 && row.front()->at > spanMin + kAreaEdgeTolerance &&
+                        row.front()->at < spanMax - kAreaEdgeTolerance)
+                        cantilever = true;
 
-            for (size_t i = 0; i < row.size(); ++i) {
-                const double at = row[i]->at;
-                const double left = i == 0 ? std::max(0.0, at - spanMin) : (at - row[i - 1]->at) / 2.0;
-                const double right = i + 1 == row.size() ? std::max(0.0, spanMax - at) : (row[i + 1]->at - at) / 2.0;
-                const CaseLoads w = psf * ((left + right) / 12.0);
-                SupportLoads& s = supports()[row[i]->index];
-                // Map the strip's cross coordinates onto the support's own axis.
-                auto toS = [&](double cross) {
-                    const Vec2 p = joistsAlongY ? Vec2{cross, at} : Vec2{at, cross};
-                    return dot(p - s.line.a, s.line.direction());
-                };
-                double s0 = toS(x0), s1 = toS(x1);
-                if (s0 > s1) std::swap(s0, s1);
-                s.lineLoads.push_back({s0, s1, w, w, name, origin});
+                    for (size_t i = 0; i < row.size(); ++i) {
+                        const double at = row[i]->at;
+                        const double left = i == 0 ? std::max(0.0, at - spanMin) : (at - row[i - 1]->at) / 2.0;
+                        const double right = i + 1 == row.size() ? std::max(0.0, spanMax - at) : (row[i + 1]->at - at) / 2.0;
+                        const CaseLoads w = psf * ((left + right) / 12.0);
+                        SupportLoads& s = supports()[row[i]->index];
+                        // Map the strip's cross coordinates onto the support's own axis.
+                        auto toS = [&](double cross) { return dot(point(cross, at) - s.line.a, s.line.direction()); };
+                        double s0 = toS(x0), s1 = toS(x1);
+                        if (s0 > s1) std::swap(s0, s1);
+                        s.lineLoads.push_back({s0, s1, w, w, name, origin});
+                    }
+                }
             }
         }
+        if (cantilever) warn(name + ": only one support across part of the framing; it would act as a cantilever.");
         if (unsupported > 1.5)
             warn(name + ": " + feetText(unsupported) + " of framing has no bearing wall or beam beneath it.");
     }

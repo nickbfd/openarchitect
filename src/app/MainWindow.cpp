@@ -7,6 +7,7 @@
 #include "SampleHouse.h"
 #include "Workspace.h"
 
+#include "oa/core/dimensions.h"
 #include "oa/core/serialization.h"
 #include "oa/structural/takedown.h"
 
@@ -23,6 +24,9 @@
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QToolBar>
+#include <QToolButton>
+
+#include <algorithm>
 
 using namespace oa;
 using namespace oa::structural;
@@ -112,50 +116,118 @@ void MainWindow::createActions() {
 
     QMenu* tools = menuBar()->addMenu("&Tools");
     auto* group = new QActionGroup(this);
-    struct ToolDef {
-        PlanView::Tool tool;
-        const char* name;
-        const char* key;
-    };
-    const ToolDef defs[] = {
-        {PlanView::Tool::Select, "Select", "S"}, {PlanView::Tool::Wall, "Wall", "W"},
-        {PlanView::Tool::Door, "Door", "D"},     {PlanView::Tool::Window, "Window", "N"},
-        {PlanView::Tool::Beam, "Beam", "B"},     {PlanView::Tool::Floor, "Floor framing", "J"},
-        {PlanView::Tool::Roof, "Roof", "R"},     {PlanView::Tool::RoofPlane, "Roof plane", "P"},
-        {PlanView::Tool::JoinPlanes, "Join roof planes", "K"}, {PlanView::Tool::Post, "Post", "O"},
-        {PlanView::Tool::RoomDivider, "Room divider", "M"},
-    };
-    for (const auto& def : defs) {
-        QAction* a = tools->addAction(def.name);
+    // One checkable action per tool, shared by the Tools menu and the
+    // toolbar's category menus.
+    auto toolAction = [&](PlanView::Tool tool, const QString& name, const char* key) {
+        QAction* a = new QAction(name, this);
         a->setCheckable(true);
-        a->setShortcut(QKeySequence(def.key));
-        a->setChecked(def.tool == PlanView::Tool::Select);
+        if (key) a->setShortcut(QKeySequence(key));
+        a->setChecked(tool == PlanView::Tool::Select);
         group->addAction(a);
-        bar->addAction(a);
-        const PlanView::Tool tool = def.tool;
-        connect(a, &QAction::triggered, this, [this, tool] {
-            tabs_->setCurrentWidget(plan_);
-            plan_->setTool(tool);
-            plan_->setFocus();
-        });
+        connect(a, &QAction::triggered, this, [this, tool] { useTool(tool); });
         connect(plan_, &PlanView::toolChanged, a, [a, tool](PlanView::Tool t) {
             if (t == tool) a->setChecked(true);
         });
-    }
-    bar->addWidget(new QLabel(" Wall type "));
-    wallTypeBox_ = new QComboBox;
-    wallTypeBox_->setSizeAdjustPolicy(QComboBox::AdjustToContents);
-    wallTypeBox_->setToolTip("The wall type new walls get");
-    connect(wallTypeBox_, &QComboBox::activated, this, [this](int i) {
-        plan_->setWallType(wallTypeBox_->itemData(i).toULongLong());
-        tabs_->setCurrentWidget(plan_);
-        plan_->setTool(PlanView::Tool::Wall);
-        plan_->setFocus();
+        return a;
+    };
+    QAction* select = toolAction(PlanView::Tool::Select, "Select", "S");
+    QAction* wall = toolAction(PlanView::Tool::Wall, "Wall", "W");
+    QAction* divider = toolAction(PlanView::Tool::RoomDivider, "Room divider", "M");
+    QAction* door = toolAction(PlanView::Tool::Door, "Door", "D");
+    QAction* window = toolAction(PlanView::Tool::Window, "Window", "N");
+    QAction* roof = toolAction(PlanView::Tool::Roof, "Roof", "R");
+    QAction* plane = toolAction(PlanView::Tool::RoofPlane, "Roof plane", "P");
+    QAction* join = toolAction(PlanView::Tool::JoinPlanes, "Join roof planes", "K");
+    QAction* beam = toolAction(PlanView::Tool::Beam, "Beam", "B");
+    QAction* post = toolAction(PlanView::Tool::Post, "Post", "O");
+    QAction* floor = toolAction(PlanView::Tool::Floor, "Floor framing", "J");
+    QAction* dimension = toolAction(PlanView::Tool::Dimension, "Dimension", "X");
+    QAction* elevation = toolAction(PlanView::Tool::Elevation, "Elevation point", "E");
+    QAction* autoRoofAction = new QAction("Roof over this level's walls", this);
+    connect(autoRoofAction, &QAction::triggered, this, &MainWindow::autoRoof);
+    QAction* autoDims = new QAction("Dimension exterior walls", this);
+    connect(autoDims, &QAction::triggered, this, &MainWindow::autoDimensions);
+    QAction* interior = new QAction("Interior wall", this);
+    interior->setShortcut(QKeySequence("I"));
+    connect(interior, &QAction::triggered, this, [this] {
+        if (const WallType* t = ws_->doc().firstWallType(WallKind::Interior)) plan_->setWallType(t->id);
+        useTool(PlanView::Tool::Wall);
     });
-    bar->addWidget(wallTypeBox_);
+    addAction(interior);
+
+    tools->addAction(select);
+    tools->addSection("Walls");
+    tools->addActions({wall, interior, divider});
+    tools->addSection("Doors and windows");
+    tools->addActions({door, window});
+    tools->addSection("Roofs");
+    tools->addActions({roof, plane, join, autoRoofAction});
+    tools->addSection("Framing");
+    tools->addActions({beam, post, floor});
+    tools->addSection("Dimensions and site");
+    tools->addActions({dimension, autoDims, elevation});
     tools->addSeparator();
-    tools->addAction("Roof over this level's walls", this, &MainWindow::autoRoof);
     tools->addAction("Add level above", this, &MainWindow::addLevel);
+
+    // The toolbar groups the tools by category, each a button with a menu.
+    bar->addAction(select);
+    auto category = [&](const QString& name, std::initializer_list<PlanView::Tool> members) {
+        auto* button = new QToolButton;
+        button->setText(name + " ");
+        button->setPopupMode(QToolButton::InstantPopup);
+        button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        button->setCheckable(true);
+        auto* menu = new QMenu(button);
+        button->setMenu(menu);
+        bar->addWidget(button);
+        std::vector<PlanView::Tool> list(members);
+        connect(plan_, &PlanView::toolChanged, button, [button, list](PlanView::Tool t) {
+            button->setChecked(std::find(list.begin(), list.end(), t) != list.end());
+        });
+        return menu;
+    };
+    wallMenu_ = category("Walls", {PlanView::Tool::Wall, PlanView::Tool::RoomDivider});
+    wallMenu_->addAction(divider); // the wall type entries go above it, see refreshWallTypes
+    QMenu* doors = category("Doors", {PlanView::Tool::Door});
+    QMenu* windows = category("Windows", {PlanView::Tool::Window});
+    struct Size {
+        const char* name;
+        double width, height, sill;
+    };
+    const Size doorSizes[] = {{"Door 2'-6\" x 6'-8\"  (2668)", 30, 80, 0},
+                              {"Door 2'-8\" x 6'-8\"  (2868)", 32, 80, 0},
+                              {"Door 3'-0\" x 6'-8\"  (3068)", 36, 80, 0},
+                              {"Double door 6'-0\" x 6'-8\"  (6068)", 72, 80, 0},
+                              {"Garage door 16'-0\" x 7'-0\"  (16070)", 192, 84, 0}};
+    const Size windowSizes[] = {{"Window 2'-0\" x 3'-0\"  (2030)", 24, 36, 44},
+                                {"Window 3'-0\" x 4'-0\"  (3040)", 36, 48, 32},
+                                {"Window 4'-0\" x 4'-0\"  (4040)", 48, 48, 32},
+                                {"Window 6'-0\" x 4'-0\"  (6040)", 72, 48, 32},
+                                {"Picture window 6'-0\" x 5'-0\"  (6050)", 72, 60, 20}};
+    for (const Size& z : doorSizes)
+        doors->addAction(z.name, this, [this, z] {
+            plan_->setOpeningSize(OpeningKind::Door, z.width, z.height, z.sill);
+            useTool(PlanView::Tool::Door);
+        });
+    for (const Size& z : windowSizes)
+        windows->addAction(z.name, this, [this, z] {
+            plan_->setOpeningSize(OpeningKind::Window, z.width, z.height, z.sill);
+            useTool(PlanView::Tool::Window);
+        });
+    QMenu* roofs = category("Roofs", {PlanView::Tool::Roof, PlanView::Tool::RoofPlane, PlanView::Tool::JoinPlanes});
+    roofs->addActions({roof, plane, join});
+    roofs->addSeparator();
+    roofs->addAction(autoRoofAction);
+    QMenu* framing = category("Framing", {PlanView::Tool::Beam, PlanView::Tool::Post, PlanView::Tool::Floor});
+    framing->addActions({beam, post, floor});
+    QMenu* dims = category("Dimensions", {PlanView::Tool::Dimension});
+    dims->addAction(dimension);
+    dims->addAction(autoDims);
+    QMenu* site = category("Terrain", {PlanView::Tool::Elevation});
+    site->addAction(elevation);
+    site->addAction("Clear the terrain", this, [this] {
+        ws_->edit("Clear terrain", [](Document& d) { d.terrain.points.clear(); });
+    });
 
     // View
     bar->addSeparator();
@@ -173,6 +245,10 @@ void MainWindow::createActions() {
         if (on) tabs_->setCurrentWidget(model_);
     });
     bar->addAction(showFraming);
+    QAction* showSizes = view->addAction("Show door and window sizes");
+    showSizes->setCheckable(true);
+    showSizes->setChecked(true);
+    connect(showSizes, &QAction::toggled, plan_, &PlanView::setShowOpeningSizes);
     view->addAction("Fit to window", QKeySequence("F"), this, [this] {
         if (tabs_->currentWidget() == plan_) plan_->zoomToFit();
         else model_->frameModel();
@@ -206,16 +282,64 @@ void MainWindow::refreshLevels() {
     levelBox_->setCurrentIndex(index);
 }
 
+void MainWindow::useTool(PlanView::Tool tool) {
+    tabs_->setCurrentWidget(plan_);
+    plan_->setTool(tool);
+    plan_->setFocus();
+}
+
+// The Walls menu lists every wall type, exterior then interior, above the room divider.
 void MainWindow::refreshWallTypes() {
     const Document& d = ws_->doc();
     if (!d.wallType(plan_->wallType())) {
         const WallType* t = d.firstWallType(WallKind::Exterior);
         plan_->setWallType(t ? t->id : kNoId);
     }
-    wallTypeBox_->clear();
-    for (const auto& t : d.wallTypes)
-        if (!t.isDivider()) wallTypeBox_->addItem(QString::fromStdString(t.name), QVariant::fromValue<qulonglong>(t.id));
-    wallTypeBox_->setCurrentIndex(wallTypeBox_->findData(QVariant::fromValue<qulonglong>(plan_->wallType())));
+    QList<QAction*> actions = wallMenu_->actions();
+    QAction* divider = actions.isEmpty() ? nullptr : actions.back();
+    for (QAction* a : actions)
+        if (a != divider) {
+            wallMenu_->removeAction(a);
+            a->deleteLater();
+        }
+    for (WallKind kind : {WallKind::Exterior, WallKind::Interior}) {
+        QAction* section = new QAction(kind == WallKind::Exterior ? "Exterior walls" : "Interior walls", wallMenu_);
+        section->setSeparator(true);
+        wallMenu_->insertAction(divider, section);
+        for (const auto& t : d.wallTypes) {
+            if (t.kind != kind) continue;
+            QAction* a = new QAction(QString::fromStdString(t.name), wallMenu_);
+            a->setCheckable(true);
+            a->setChecked(t.id == plan_->wallType());
+            const ObjectId id = t.id;
+            connect(a, &QAction::triggered, this, [this, id] {
+                plan_->setWallType(id);
+                useTool(PlanView::Tool::Wall);
+                refreshWallTypes();
+            });
+            wallMenu_->insertAction(divider, a);
+        }
+    }
+    QAction* sep = new QAction(wallMenu_);
+    sep->setSeparator(true);
+    wallMenu_->insertAction(divider, sep);
+}
+
+void MainWindow::autoDimensions() {
+    const ObjectId level = ws_->currentLevel();
+    const auto dims = exteriorDimensions(ws_->doc(), level);
+    if (dims.empty()) {
+        statusBar()->showMessage("Draw exterior walls on this level first.");
+        return;
+    }
+    ws_->edit("Dimension exterior walls", [&](Document& d) {
+        std::erase_if(d.dimensions, [level](const Dimension& x) { return x.automatic && x.levelId == level; });
+        for (Dimension x : dims) {
+            x.id = d.newId();
+            d.dimensions.push_back(x);
+        }
+    });
+    statusBar()->showMessage(QString("Added %1 dimensions. Run it again after changing walls to redo them.").arg(dims.size()));
 }
 
 void MainWindow::updateTitle() {

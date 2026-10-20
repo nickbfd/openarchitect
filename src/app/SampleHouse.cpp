@@ -1,5 +1,6 @@
 #include "SampleHouse.h"
 
+#include "oa/core/dimensions.h"
 #include "oa/core/units.h"
 
 using namespace oa;
@@ -121,6 +122,9 @@ Document makeSampleHouse() {
     wall(d, l1, {0, -porch}, {feet(16), -porch}, divider, false);
     wall(d, l1, {feet(16), -porch}, {feet(16), 0}, divider, false);
     room(d, l1, "Porch", RoomType::Deck, {{0, -porch}, {feet(16), 0}});
+    // The porch floor is a concrete patio slab, stepped down from the house.
+    d.rooms.back().floor.kind = FloorSystemKind::Slab;
+    d.rooms.back().floor.drop = 4.0;
 
     // Floor 2
     const ObjectId south2 = wall(d, l2, {0, 0}, {W, 0}, exterior);
@@ -155,7 +159,20 @@ Document makeSampleHouse() {
     roof.pitch = 6.0;
     roof.overhang = 18.0;
     d.roofs.push_back(roof);
+    // The lot falls from north to south, a little below the first floor at the house.
+    const struct { double x, y, z; } grade[] = {
+        {-feet(15), D + feet(15), -6},  {W / 2, D + feet(15), -4},     {W + feet(15), D + feet(15), -8},
+        {-feet(15), D / 2, -8},         {W + feet(15), D / 2, -10},    {-feet(15), -feet(20), -30},
+        {W / 2, -feet(20), -36},        {W + feet(15), -feet(20), -40}, {feet(8), -feet(10), -10},
+    };
+    for (const auto& g : grade) d.terrain.points.push_back({d.newId(), {g.x, g.y}, g.z});
+
     // Walls take their types' sizes, and the rooms above are matched to the walls.
     d.refresh();
+    for (const ObjectId l : {l1, l2})
+        for (Dimension dim : exteriorDimensions(d, l)) {
+            dim.id = d.newId();
+            d.dimensions.push_back(dim);
+        }
     return d;
 }

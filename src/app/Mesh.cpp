@@ -1,5 +1,6 @@
 #include "Mesh.h"
 
+#include "oa/core/terrain.h"
 #include "oa/structural/members.h"
 #include "oa/structural/posts.h"
 
@@ -25,6 +26,8 @@ constexpr Color kPost{0.80f, 0.58f, 0.33f};
 constexpr Color kLumber{0.87f, 0.74f, 0.52f};
 constexpr Color kHeader{0.80f, 0.55f, 0.30f};
 constexpr Color kInsulation{0.96f, 0.68f, 0.72f};
+constexpr Color kConcrete{0.74f, 0.74f, 0.72f};
+constexpr Color kGround{0.55f, 0.68f, 0.42f};
 
 // Depth of the header over an opening: its assigned member, or a 2x10.
 double headerDepth(const Opening& o) {
@@ -120,6 +123,41 @@ void addPlatform(Builder& b, const Document& doc, const FloorPlatform& p) {
     const double thickness = below ? below->floorThickness : 4.0; // otherwise a slab on grade
     b.box({r.min.x, r.center().y}, {1, 0}, r.width(), r.height(), level->elevation - thickness,
           level->elevation, kFloor);
+}
+
+// A slab room's concrete, from its surface down by the slab thickness.
+// It sits a hair above the level's floor so the two don't flicker.
+void addSlab(Builder& b, const Document& doc, const Room& r) {
+    const Level* level = doc.level(r.levelId);
+    if (!level || r.floor.kind != FloorSystemKind::Slab || r.outline.size() < 3) return;
+    const double z1 = level->elevation - r.floor.drop + 0.1;
+    const double z0 = z1 - r.floor.slabThickness;
+    const Polygon& o = r.outline;
+    const bool ccw = signedArea(o) > 0;
+    for (const auto& t : triangulate(o)) {
+        Vec3 p[3];
+        for (int i = 0; i < 3; ++i) p[i] = {o[t[i]].x, o[t[i]].y, z1};
+        b.triangle(p[0], p[1], p[2], kConcrete);
+        b.triangle({p[0].x, p[0].y, z0}, {p[2].x, p[2].y, z0}, {p[1].x, p[1].y, z0}, kConcrete);
+    }
+    const int n = static_cast<int>(o.size());
+    for (int i = 0; i < n; ++i) {
+        Vec2 a = o[i], c = o[(i + 1) % n];
+        if (!ccw) std::swap(a, c);
+        b.quad({a.x, a.y, z0}, {c.x, c.y, z0}, {c.x, c.y, z1}, {a.x, a.y, z1}, kConcrete);
+    }
+}
+
+// The site surface between the elevation points, measured from the lowest level's floor.
+void addTerrain(Builder& b, const Document& doc) {
+    const Level* ground = doc.groundLevel();
+    const TerrainMesh t = terrainMesh(doc.terrain);
+    const double base = ground ? ground->elevation : 0.0;
+    for (const auto& tri : t.triangles) {
+        Vec3 p[3];
+        for (int i = 0; i < 3; ++i) p[i] = {t.points[tri[i]].x, t.points[tri[i]].y, base + t.elevations[tri[i]]};
+        b.triangle(p[0], p[1], p[2], kGround);
+    }
 }
 
 void addBeam(Builder& b, const Document& doc, const Beam& beam) {
@@ -308,6 +346,12 @@ Mesh buildMesh(const Document& doc, ObjectId selected, bool framing) {
         b.owner = p.id;
         addPlatform(b, doc, p);
     }
+    for (const auto& r : doc.rooms) {
+        b.owner = r.id;
+        addSlab(b, doc, r);
+    }
+    b.owner = kNoId;
+    addTerrain(b, doc);
     for (const auto& w : doc.walls) {
         if (framing && doc.wallType(w.wallTypeId)) addWallFraming(b, doc, w);
         else addWall(b, doc, w);
