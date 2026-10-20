@@ -36,6 +36,16 @@ private:
     void button(const QString& text, std::function<void()> onClick);
     void note(const QString& html);
 
+    // Rows that edit several selected objects at once. A value that differs
+    // between them shows as "varies" until it is set.
+    using Ids = std::vector<oa::ObjectId>;
+    void lengthAll(const QString& label, const Ids& ids, std::function<double(const oa::Document&, oa::ObjectId)> get,
+                   std::function<void(oa::Document&, oa::ObjectId, double)> set, double minimum = 0.0);
+    void choiceAll(const QString& label, const QStringList& items, const Ids& ids,
+                   std::function<int(const oa::Document&, oa::ObjectId)> get,
+                   std::function<void(oa::Document&, oa::ObjectId, int)> set);
+    void showMany(const Ids& ids);
+
     void showPlan();
     void showWall(const oa::Wall& w);
     void showOpening(const oa::Opening& o);

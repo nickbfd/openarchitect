@@ -126,6 +126,10 @@ struct Dimension {
 
 // A spot elevation on the site, relative to the first floor (0 = the
 // lowest level's floor). The terrain surface runs between these points.
+// Where dimensions to walls land: the outside face of the studs, or the
+// middle of the studs.
+enum class DimensionTo { FramingEdge, FramingCenter };
+
 struct ElevationPoint {
     ObjectId id = kNoId;
     Vec2 position;
@@ -269,6 +273,7 @@ struct Document {
     std::vector<Beam> beams;
     std::vector<Post> posts;
     std::vector<Dimension> dimensions;
+    DimensionTo dimensionTo = DimensionTo::FramingEdge;
     Terrain terrain;
     ObjectId nextId = 1;
 

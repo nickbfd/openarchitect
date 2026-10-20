@@ -21,10 +21,10 @@ struct Mesh {
     bool empty() const { return vertices.empty(); }
 };
 
-// The object `selected` is drawn in the selection color. With `framing`,
+// The objects in `selected` are drawn in the selection color. With `framing`,
 // walls that have a wall type show their studs, plates, headers and
 // insulation instead of a solid wall.
-Mesh buildMesh(const oa::Document& doc, oa::ObjectId selected = oa::kNoId, bool framing = false);
+Mesh buildMesh(const oa::Document& doc, const std::vector<oa::ObjectId>& selected = {}, bool framing = false);
 
 // The object whose triangle a ray from `origin` along `dir` hits first, or kNoId.
 oa::ObjectId pickMesh(const Mesh& mesh, oa::Vec3 origin, oa::Vec3 dir);

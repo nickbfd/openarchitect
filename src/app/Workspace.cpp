@@ -2,6 +2,7 @@
 
 #include "oa/core/serialization.h"
 
+#include <algorithm>
 #include <filesystem>
 
 Workspace::Workspace(QObject* parent) : QObject(parent) { newDocument(); }
@@ -41,7 +42,7 @@ void Workspace::newDocument(oa::Document doc) {
     undo_.clear();
     filePath_.clear();
     loads_.reset();
-    selection_ = oa::kNoId;
+    selection_.clear();
     currentLevel_ = doc_.levels.empty() ? oa::kNoId : doc_.levelsByElevation().front()->id;
     validateState();
     emit documentChanged();
@@ -83,8 +84,20 @@ void Workspace::setCurrentLevel(oa::ObjectId id) {
 }
 
 void Workspace::select(oa::ObjectId id) {
-    if (id == selection_) return;
-    selection_ = id;
+    if (id == oa::kNoId ? selection_.empty() : selection_.size() == 1 && selection_.front() == id) return;
+    selection_.clear();
+    if (id != oa::kNoId) selection_.push_back(id);
+    emit selectionChanged();
+}
+
+bool Workspace::isSelected(oa::ObjectId id) const {
+    return id != oa::kNoId && std::find(selection_.begin(), selection_.end(), id) != selection_.end();
+}
+
+void Workspace::selectMany(std::vector<oa::ObjectId> ids) {
+    std::erase(ids, oa::kNoId);
+    if (ids == selection_) return;
+    selection_ = std::move(ids);
     emit selectionChanged();
 }
 
@@ -118,9 +131,7 @@ void Workspace::validateState() {
         currentLevel_ = levels.empty() ? oa::kNoId : levels.front()->id;
         emit currentLevelChanged();
     }
-    if (selection_ == oa::kNoId) return;
-    if (!doc_.contains(selection_) || doc_.level(selection_)) {
-        selection_ = oa::kNoId;
-        emit selectionChanged();
-    }
+    const size_t before = selection_.size();
+    std::erase_if(selection_, [this](oa::ObjectId id) { return !doc_.contains(id) || doc_.level(id); });
+    if (selection_.size() != before) emit selectionChanged();
 }

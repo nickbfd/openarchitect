@@ -1,5 +1,6 @@
 #include "Mesh.h"
 
+#include "oa/core/dimensions.h"
 #include "oa/core/terrain.h"
 #include "oa/structural/members.h"
 #include "oa/structural/posts.h"
@@ -39,10 +40,10 @@ class Builder {
 public:
     Mesh mesh;
     ObjectId owner = kNoId;    // object the next triangles belong to
-    ObjectId selected = kNoId;
+    std::vector<ObjectId> selected;
 
     void triangle(Vec3 a, Vec3 b, Vec3 c, Color col) {
-        if (owner != kNoId && owner == selected)
+        if (owner != kNoId && std::find(selected.begin(), selected.end(), owner) != selected.end())
             col = {col.r * 0.35f + kSelected.r * 0.65f, col.g * 0.35f + kSelected.g * 0.65f,
                    col.b * 0.35f + kSelected.b * 0.65f};
         const Vec3 u{b.x - a.x, b.y - a.y, b.z - a.z};
@@ -228,7 +229,7 @@ void addWallFraming(Builder& b, const Document& doc, const Wall& w) {
     const double shift = type->kind == WallKind::Exterior
                              ? (w.thickness / 2.0 - type->siding - type->sheathing - depth / 2.0)
                              : 0.0;
-    const Vec2 base = w.a + dir.perp() * -shift;
+    const Vec2 base = w.a + wallOutside(doc, w) * shift;
     auto stick = [&](double s0, double s1, double za, double zb, Color c, double width) {
         b.box(base + dir * s0, dir, s1 - s0, width, z0 + za, z0 + zb, c);
     };
@@ -339,7 +340,7 @@ void addRoof(Builder& b, const Document& doc, const Roof& roof) {
 
 } // namespace
 
-Mesh buildMesh(const Document& doc, ObjectId selected, bool framing) {
+Mesh buildMesh(const Document& doc, const std::vector<ObjectId>& selected, bool framing) {
     Builder b;
     b.selected = selected;
     for (const auto& p : doc.platforms) {

@@ -2,6 +2,7 @@
 
 #include "Workspace.h"
 
+#include "oa/core/dimensions.h"
 #include "oa/core/terrain.h"
 #include "oa/core/units.h"
 #include "oa/structural/members.h"
@@ -77,11 +78,69 @@ QColor loadColor(double fraction) {
 
 } // namespace
 
+namespace {
+
+// Dimensions on the same line as `id`'s dimension line: one string, which
+// moves in and out together.
+std::vector<ObjectId> dimensionString(const Document& d, ObjectId id) {
+    const Dimension* base = d.dimension(id);
+    if (!base || base->length() < 1e-6) return {};
+    const Vec2 dir = (base->b - base->a).normalized();
+    const Vec2 origin = base->a + dir.perp() * base->offset;
+    std::vector<ObjectId> out;
+    for (const auto& x : d.dimensions) {
+        if (x.levelId != base->levelId || x.length() < 1e-6) continue;
+        const Vec2 xd = (x.b - x.a).normalized();
+        if (std::abs(cross(xd, dir)) > 1e-3) continue;
+        const Vec2 xa = x.a + xd.perp() * x.offset;
+        if (std::abs(cross(xa - origin, dir)) > 0.5) continue;
+        out.push_back(x.id);
+    }
+    return out;
+}
+
+// Moves objects by `delta`. Openings ride along with their walls, and rooms
+// follow the walls on the next refresh.
+void moveObjects(Document& d, const std::vector<ObjectId>& ids, Vec2 delta) {
+    for (ObjectId id : ids) {
+        if (Wall* w = d.wall(id)) {
+            w->a += delta;
+            w->b += delta;
+        } else if (Beam* b = d.beam(id)) {
+            b->a += delta;
+            b->b += delta;
+        } else if (RoofPlane* r = d.roofPlane(id)) {
+            r->a += delta;
+            r->b += delta;
+            for (Vec2& p : r->outline) p += delta;
+        } else if (Roof* r = d.roof(id)) {
+            r->footprint.min += delta;
+            r->footprint.max += delta;
+        } else if (FloorPlatform* f = d.platform(id)) {
+            f->area.min += delta;
+            f->area.max += delta;
+        } else if (Post* p = d.post(id)) {
+            p->position += delta;
+        } else if (ElevationPoint* e = d.elevationPoint(id)) {
+            e->position += delta;
+        } else if (Dimension* x = d.dimension(id)) {
+            x->a += delta;
+            x->b += delta;
+            x->automatic = false;
+        }
+    }
+}
+
+} // namespace
+
 PlanView::PlanView(Workspace* ws, QWidget* parent) : QWidget(parent), ws_(ws) {
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setAutoFillBackground(false);
-    connect(ws_, &Workspace::documentChanged, this, qOverload<>(&QWidget::update));
+    connect(ws_, &Workspace::documentChanged, this, [this] {
+        dimensionSnapsValid_ = false;
+        update();
+    });
     connect(ws_, &Workspace::selectionChanged, this, [this] {
         // A selection made elsewhere (the 3D view, the loads table) ends the stack.
         if (std::find(stack_.begin(), stack_.end(), ws_->selection()) == stack_.end()) {
@@ -91,6 +150,7 @@ PlanView::PlanView(Workspace* ws, QWidget* parent) : QWidget(parent), ws_(ws) {
         update();
     });
     connect(ws_, &Workspace::currentLevelChanged, this, [this] {
+        dimensionSnapsValid_ = false;
         anchor_.reset();
         anchor2_.reset();
         update();
@@ -250,7 +310,7 @@ std::optional<std::pair<ObjectId, int>> PlanView::roofEdgeNear(Vec2 p) const {
 
 std::optional<int> PlanView::roofVertexAt(QPointF pos) const {
     const RoofPlane* r = doc().roofPlane(ws_->selection());
-    if (!r) return std::nullopt;
+    if (!r || ws_->selectedIds().size() != 1) return std::nullopt;
     for (size_t i = 0; i < r->outline.size(); ++i)
         if (QLineF(toScreen(r->outline[i]), pos).length() <= kPickPixels) return static_cast<int>(i);
     return std::nullopt;
@@ -258,7 +318,7 @@ std::optional<int> PlanView::roofVertexAt(QPointF pos) const {
 
 std::optional<int> PlanView::roofEdgeHandleAt(QPointF pos) const {
     const RoofPlane* r = doc().roofPlane(ws_->selection());
-    if (!r) return std::nullopt;
+    if (!r || ws_->selectedIds().size() != 1) return std::nullopt;
     const size_t n = r->outline.size();
     for (size_t i = 0; i < n; ++i)
         if (QLineF(toScreen((r->outline[i] + r->outline[(i + 1) % n]) * 0.5), pos).length() <= kPickPixels)
@@ -274,7 +334,11 @@ std::vector<ObjectId> PlanView::pickAll(Vec2 p) const {
     for (const auto& d : doc().dimensions) {
         if (d.levelId != level || d.length() < 1e-6) continue;
         const Vec2 n = (d.b - d.a).normalized().perp() * d.offset;
-        if (Segment{d.a + n, d.b + n}.distanceTo(p) <= tol) hits.push_back(d.id);
+        const Segment line{d.a + n, d.b + n};
+        // The line itself, or the length written over its middle.
+        const double t = line.project(p);
+        if (line.distanceTo(p) <= tol || (t > 0.2 && t < 0.8 && line.distanceTo(p) <= 2.5 * tol))
+            hits.push_back(d.id);
     }
     if (const Level* ground = doc().groundLevel(); ground && ground->id == level)
         for (const auto& e : doc().terrain.points)
@@ -365,6 +429,137 @@ void PlanView::showStackMenu(QPointF screenPos, const std::vector<ObjectId>& hit
     menu.exec(mapToGlobal(screenPos.toPoint()));
 }
 
+// ---- Box selection and dimension nodes -------------------------------------
+
+bool PlanView::toolAccepts(ObjectId id) const {
+    const Document& d = doc();
+    switch (tool_) {
+    case Tool::Select: return true;
+    case Tool::Wall: return d.wall(id) && !d.wall(id)->roomDivider;
+    case Tool::RoomDivider: return d.wall(id) && d.wall(id)->roomDivider;
+    case Tool::Door: return d.opening(id) && d.opening(id)->kind == OpeningKind::Door;
+    case Tool::Window: return d.opening(id) && d.opening(id)->kind == OpeningKind::Window;
+    case Tool::Beam: return d.beam(id) != nullptr;
+    case Tool::Post: return d.post(id) != nullptr;
+    case Tool::Floor: return Document::findIn(d.platforms, id) != nullptr;
+    case Tool::Roof: return d.roof(id) != nullptr;
+    case Tool::RoofPlane:
+    case Tool::JoinPlanes: return d.roofPlane(id) != nullptr;
+    case Tool::Dimension: return d.dimension(id) != nullptr;
+    case Tool::Elevation: return d.elevationPoint(id) != nullptr;
+    }
+    return false;
+}
+
+std::vector<ObjectId> PlanView::boxPick(QPointF a, QPointF b) const {
+    const Vec2 p = toWorld(a), q = toWorld(b);
+    const Rect box{{std::min(p.x, q.x), std::min(p.y, q.y)}, {std::max(p.x, q.x), std::max(p.y, q.y)}};
+    auto inside = [&](std::initializer_list<Vec2> pts) {
+        return std::all_of(pts.begin(), pts.end(), [&](Vec2 v) { return box.contains(v); });
+    };
+    auto polyInside = [&](const Polygon& poly) {
+        return !poly.empty() && std::all_of(poly.begin(), poly.end(), [&](Vec2 v) { return box.contains(v); });
+    };
+    const Document& d = doc();
+    const ObjectId level = ws_->currentLevel();
+    std::vector<ObjectId> out;
+    auto take = [&](ObjectId id, bool in) {
+        if (in && toolAccepts(id)) out.push_back(id);
+    };
+    for (const auto& w : d.walls)
+        if (w.levelId == level) take(w.id, inside({w.a, w.b}));
+    for (const auto& o : d.openings) {
+        const Wall* w = d.wall(o.wallId);
+        if (!w || w->levelId != level || w->length() < 1e-6) continue;
+        const Vec2 dir = (w->b - w->a).normalized();
+        take(o.id, inside({w->a + dir * (o.offset - o.width / 2.0), w->a + dir * (o.offset + o.width / 2.0)}));
+    }
+    for (const auto& b : d.beams)
+        if (b.levelId == level) take(b.id, inside({b.a, b.b}));
+    for (const auto& post : d.posts)
+        if (post.levelId == level) take(post.id, inside({post.position}));
+    for (const auto& r : d.roofPlanes)
+        if (r.levelId == level) take(r.id, polyInside(r.outline));
+    for (const auto& r : d.roofs)
+        if (r.levelId == level) take(r.id, inside({r.footprint.min, r.footprint.max}));
+    for (const auto& f : d.platforms)
+        if (f.levelId == level) take(f.id, inside({f.area.min, f.area.max}));
+    for (const auto& r : d.rooms)
+        if (r.levelId == level) take(r.id, polyInside(r.outline));
+    for (const auto& x : d.dimensions) {
+        if (x.levelId != level || x.length() < 1e-6) continue;
+        const Vec2 n = (x.b - x.a).normalized().perp() * x.offset;
+        take(x.id, inside({x.a, x.b, x.a + n, x.b + n}));
+    }
+    if (const Level* ground = d.groundLevel(); ground && ground->id == level)
+        for (const auto& e : d.terrain.points) take(e.id, inside({e.position}));
+    return out;
+}
+
+void PlanView::finishBox(QPointF a, QPointF b, bool add) {
+    const bool click = QLineF(a, b).length() < 4.0;
+    std::vector<ObjectId> ids = add || click ? ws_->selectedIds() : std::vector<ObjectId>{};
+    if (click) {
+        // Shift-click adds or removes the topmost object here the tool accepts.
+        for (ObjectId id : pickAll(toWorld(b))) {
+            if (!toolAccepts(id)) continue;
+            if (auto it = std::find(ids.begin(), ids.end(), id); it != ids.end()) ids.erase(it);
+            else ids.push_back(id);
+            break;
+        }
+    } else {
+        for (ObjectId id : boxPick(a, b))
+            if (std::find(ids.begin(), ids.end(), id) == ids.end()) ids.push_back(id);
+    }
+    stack_.clear();
+    stackHint_.clear();
+    ws_->selectMany(ids);
+    if (ids.size() > 1)
+        emit statusMessage(QString("%1 selected. Edit them together in Properties, drag one to move them all, or press "
+                                   "Delete.").arg(ids.size()));
+    else if (ids.empty() && !click)
+        emit statusMessage(tool_ == Tool::Select ? QString("Nothing lies entirely inside the box.")
+                                                 : QString("Nothing of this tool's kind lies entirely inside the box."));
+}
+
+std::optional<Vec2> PlanView::dimensionSnap(Vec2 p, Qt::KeyboardModifiers mods) const {
+    if (mods & Qt::ControlModifier) return std::nullopt;
+    if (!dimensionSnapsValid_) {
+        dimensionSnaps_ = dimensionSnapPoints(ws_->doc(), ws_->currentLevel());
+        dimensionSnapsValid_ = true;
+    }
+    double best = kSnapPixels / scale_;
+    std::optional<Vec2> hit;
+    for (Vec2 q : dimensionSnaps_)
+        if (const double dist = distance(p, q); dist < best) {
+            best = dist;
+            hit = q;
+        }
+    return hit;
+}
+
+std::optional<PlanView::Drag> PlanView::dimensionHandleAt(QPointF pos) const {
+    const Dimension* x = doc().dimension(ws_->selection());
+    if (!x || ws_->selectedIds().size() != 1 || x->levelId != ws_->currentLevel()) return std::nullopt;
+    if (QLineF(toScreen(x->a), pos).length() <= kPickPixels) return Drag::DimA;
+    if (QLineF(toScreen(x->b), pos).length() <= kPickPixels) return Drag::DimB;
+    return std::nullopt;
+}
+
+void PlanView::drawBox(QPainter& g) const {
+    if (drag_ != Drag::Box) return;
+    const QRectF r = QRectF(boxStart_, boxEnd_).normalized();
+    g.setPen(QPen(QColor(30, 110, 220), 1, Qt::DashLine));
+    g.setBrush(QColor(30, 110, 220, 30));
+    g.drawRect(r);
+    if (tool_ != Tool::Select) {
+        static const char* kinds[] = {"", "walls", "doors", "windows", "beams", "floor framing", "roofs", "room dividers",
+                                      "roof planes", "roof planes", "posts", "dimensions", "elevation points"};
+        g.setPen(QColor(30, 110, 220));
+        g.drawText(boxEnd_ + QPointF(12, -10), QString("Only %1").arg(kinds[static_cast<int>(tool_)]));
+    }
+}
+
 // ---- Painting --------------------------------------------------------------
 
 void PlanView::paintEvent(QPaintEvent*) {
@@ -391,13 +586,15 @@ void PlanView::paintEvent(QPaintEvent*) {
     if (showLoads_) drawLoads(g);
     drawToolPreview(g);
     drawTyped(g);
+    drawBox(g);
 
     const Level* level = doc().level(ws_->currentLevel());
     g.setPen(QColor(90, 90, 90));
     g.drawText(QRectF(10, 6, width() - 20, 20), Qt::AlignLeft,
                level ? QString::fromStdString(level->name) : QString());
     if (!stackHint_.isEmpty()) {
-        const QRectF box(10, 28, std::min(width() - 20.0, 640.0), 22);
+        // At the bottom, clear of the dimensions that usually run along the top.
+        const QRectF box(10, height() - 32, std::min(width() - 20.0, 640.0), 22);
         g.setPen(Qt::NoPen);
         g.setBrush(QColor(30, 110, 220, 230));
         g.drawRoundedRect(box, 4, 4);
@@ -441,7 +638,7 @@ void PlanView::drawRooms(QPainter& g) const {
         if (r.levelId != ws_->currentLevel() || r.outline.size() < 3) continue;
         QPolygonF poly;
         for (auto p : r.outline) poly << toScreen(p);
-        const bool selected = r.id == ws_->selection();
+        const bool selected = ws_->isSelected(r.id);
         g.setPen(selected ? QPen(QColor(30, 110, 220), 2) : Qt::NoPen);
         g.setBrush(roomColor(r.type));
         g.drawPolygon(poly);
@@ -478,7 +675,7 @@ void PlanView::drawRooms(QPainter& g) const {
 void PlanView::drawPlatforms(QPainter& g) const {
     for (const auto& f : doc().platforms) {
         if (f.levelId != ws_->currentLevel()) continue;
-        const bool selected = f.id == ws_->selection();
+        const bool selected = ws_->isSelected(f.id);
         QPen pen(selected ? QColor(30, 110, 220) : QColor(90, 140, 200), selected ? 2 : 1, Qt::DashDotLine);
         g.setPen(pen);
         g.setBrush(Qt::NoBrush);
@@ -521,13 +718,17 @@ void PlanView::drawWalls(QPainter& g) const {
         g.drawPolygon(poly);
     }
     // Selection drawn on top so it is not hidden by a neighbor.
-    if (const Wall* w = d.wall(ws_->selection()); w && w->levelId == ws_->currentLevel()) {
+    const bool single = ws_->selectedIds().size() == 1;
+    for (ObjectId id : ws_->selectedIds()) {
+        const Wall* w = d.wall(id);
+        if (!w || w->levelId != ws_->currentLevel()) continue;
         const Vec2 n = (w->b - w->a).normalized().perp() * (std::max(w->thickness, 2.0) / 2.0 + 1.0 / scale_);
         QPolygonF poly;
         poly << toScreen(w->a + n) << toScreen(w->b + n) << toScreen(w->b - n) << toScreen(w->a - n);
         g.setPen(QPen(QColor(30, 110, 220), 2));
         g.setBrush(QColor(30, 110, 220, 60));
         g.drawPolygon(poly);
+        if (!single) continue;
         for (Vec2 end : {w->a, w->b}) g.drawEllipse(toScreen(end), 4, 4);
         drawLengthLabel(g, w->a + n * 4.0, w->b + n * 4.0);
     }
@@ -548,7 +749,7 @@ void PlanView::drawOpenings(QPainter& g) const {
         g.setBrush(Qt::white);
         g.drawPolygon(gap);
 
-        const bool selected = o.id == ws_->selection();
+        const bool selected = ws_->isSelected(o.id);
         g.setPen(QPen(selected ? QColor(30, 110, 220) : QColor(40, 40, 40), selected ? 2 : 1));
         g.setBrush(Qt::NoBrush);
         g.drawLine(toScreen(s0 + n), toScreen(s0 - n));
@@ -567,18 +768,18 @@ void PlanView::drawOpenings(QPainter& g) const {
             const double startDeg = std::atan2(dir.y, dir.x) * 180.0 / kPi;
             g.drawArc(QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r), int(startDeg * 16), int(90 * 16));
         }
-        if (selected) drawLengthLabel(g, s0 + n * 3.0, s1 + n * 3.0);
-        if (showOpeningSizes_ && !selected) {
-            // Outside the wall (to the right of its direction, where exterior walls drawn
-            // counter-clockwise face out), clear of the door swing.
-            const Vec2 mid = (s0 + s1) * 0.5 - dir.perp() * (w->thickness / 2.0);
+        if (selected && ws_->selectedIds().size() == 1) drawLengthLabel(g, s0 + n * 3.0, s1 + n * 3.0);
+        if (showOpeningSizes_ && !(selected && ws_->selectedIds().size() == 1)) {
+            // On the outside of the wall, clear of the door swing.
+            const Vec2 outside = wallOutside(doc(), *w);
+            const Vec2 mid = (s0 + s1) * 0.5 + outside * (w->thickness / 2.0);
             g.setPen(QColor(40, 40, 120));
             QFont f = g.font();
             const QFont old = f;
             f.setPointSizeF(std::max(6.5, old.pointSizeF() - 1.0));
             g.setFont(f);
             const QPointF a = toScreen(mid), b = toScreen(mid + dir);
-            QPointF out = toScreen(mid - dir.perp()) - a;
+            QPointF out = toScreen(mid + outside) - a;
             const double len = std::hypot(out.x(), out.y());
             if (len > 1e-9) out /= len;
             drawAlong(g, a + out * 10.0, b - a, sizeCallout(o.width, o.height), -8.0);
@@ -598,7 +799,7 @@ void PlanView::drawBeams(QPainter& g) const {
     const Vec2 middle = lo.x <= hi.x ? (lo + hi) * 0.5 : Vec2{};
     for (const auto& b : doc().beams) {
         if (b.levelId != ws_->currentLevel()) continue;
-        const bool selected = b.id == ws_->selection();
+        const bool selected = ws_->isSelected(b.id);
         QPen pen(selected ? QColor(30, 110, 220) : QColor(170, 100, 30), std::max(3.0, pixels(3.5)), Qt::DashLine);
         pen.setCapStyle(Qt::FlatCap);
         g.setPen(pen);
@@ -612,14 +813,14 @@ void PlanView::drawBeams(QPainter& g) const {
         const bool below = mid.y() > toScreen(middle).y();
         g.setPen(QColor(140, 80, 20));
         g.drawText(mid + QPointF(6, below ? 18 : -8), label);
-        if (selected) drawLengthLabel(g, b.a, b.b);
+        if (selected && ws_->selectedIds().size() == 1) drawLengthLabel(g, b.a, b.b);
     }
 }
 
 void PlanView::drawRoofs(QPainter& g) const {
     for (const auto& r : doc().roofs) {
         if (r.levelId != ws_->currentLevel()) continue;
-        const bool selected = r.id == ws_->selection();
+        const bool selected = ws_->isSelected(r.id);
         const QColor color = selected ? QColor(30, 110, 220) : QColor(150, 60, 60);
         const Rect& fp = r.footprint;
         const Rect eaves{fp.min - Vec2{r.overhang, r.overhang}, fp.max + Vec2{r.overhang, r.overhang}};
@@ -661,7 +862,7 @@ void PlanView::drawRoofs(QPainter& g) const {
 void PlanView::drawRoofPlanes(QPainter& g) const {
     for (const auto& r : doc().roofPlanes) {
         if (r.levelId != ws_->currentLevel() || r.outline.size() < 3) continue;
-        const bool selected = r.id == ws_->selection();
+        const bool selected = ws_->isSelected(r.id);
         const QColor color = selected ? QColor(30, 110, 220) : QColor(150, 60, 60);
         QPolygonF poly;
         for (Vec2 p : r.outline) poly << toScreen(p);
@@ -687,7 +888,7 @@ void PlanView::drawRoofPlanes(QPainter& g) const {
         g.drawText(toScreen(mid + up * arrow) + QPointF(6, 0),
                    QString("%1/12%2").arg(r.pitch).arg(r.highBearing ? "" : ", to ridge"));
 
-        if (!selected) continue;
+        if (!selected || ws_->selectedIds().size() != 1) continue;
         // Handles: squares at the corners, diamonds mid-edge, with each edge's length.
         const size_t n = r.outline.size();
         for (size_t i = 0; i < n; ++i) {
@@ -715,7 +916,7 @@ void PlanView::drawPosts(QPainter& g) const {
         const double bx = (m ? m->b : 3.5) / 2.0, by = (m ? m->d : 3.5) / 2.0;
         const QRectF box(toScreen(p.position + Vec2{-bx, by}), toScreen(p.position + Vec2{bx, -by}));
         const QRectF shown = box.width() < 8 ? QRectF(box.center() - QPointF(4, 4), QSizeF(8, 8)) : box;
-        const bool selected = p.id == ws_->selection();
+        const bool selected = ws_->isSelected(p.id);
         const QColor color = selected ? QColor(30, 110, 220) : QColor(140, 80, 20);
         g.setPen(QPen(color, selected ? 2 : 1.5));
         g.setBrush(QColor(235, 200, 150));
@@ -750,7 +951,22 @@ void PlanView::drawDimension(QPainter& g, Vec2 a, Vec2 b, double offset, bool se
 
 void PlanView::drawDimensions(QPainter& g) const {
     for (const auto& d : doc().dimensions)
-        if (d.levelId == ws_->currentLevel()) drawDimension(g, d.a, d.b, d.offset, d.id == ws_->selection());
+        if (d.levelId == ws_->currentLevel()) drawDimension(g, d.a, d.b, d.offset, ws_->isSelected(d.id));
+    // Nodes of a selected dimension: squares on the points it measures, which
+    // drag to other points, and a diamond on the line, which drags the string in or out.
+    const Dimension* x = doc().dimension(ws_->selection());
+    if (!x || ws_->selectedIds().size() != 1 || x->levelId != ws_->currentLevel() || x->length() < 1e-6) return;
+    g.setPen(QPen(QColor(30, 110, 220), 1.5));
+    g.setBrush(Qt::white);
+    for (Vec2 p : {x->a, x->b}) {
+        const QPointF c = toScreen(p);
+        g.drawRect(QRectF(c.x() - 4, c.y() - 4, 8, 8));
+    }
+    const Vec2 n = (x->b - x->a).normalized().perp() * x->offset;
+    const QPointF m = toScreen((x->a + x->b) * 0.5 + n);
+    QPolygonF diamond;
+    diamond << m + QPointF(0, -6) << m + QPointF(6, 0) << m + QPointF(0, 6) << m + QPointF(-6, 0);
+    g.drawPolygon(diamond);
 }
 
 void PlanView::drawTerrain(QPainter& g) const {
@@ -772,7 +988,7 @@ void PlanView::drawTerrain(QPainter& g) const {
         drawAlong(g, (a + b) / 2.0, b - a, lengthText(s.elevation), 1.0);
     }
     for (const auto& p : t.points) {
-        const bool selected = p.id == ws_->selection();
+        const bool selected = ws_->isSelected(p.id);
         const QPointF c = toScreen(p.position);
         g.setPen(QPen(selected ? QColor(30, 110, 220) : QColor(120, 80, 30), selected ? 2 : 1.2));
         g.setBrush(Qt::NoBrush);
@@ -1168,9 +1384,12 @@ void PlanView::joinClick(Vec2 p) {
 }
 
 void PlanView::deleteSelection() {
-    const ObjectId id = ws_->selection();
-    if (id == kNoId) return;
-    ws_->edit("Delete", [id](Document& d) { d.remove(id); });
+    const std::vector<ObjectId> ids = ws_->selectedIds();
+    if (ids.empty()) return;
+    ws_->edit(ids.size() == 1 ? "Delete" : QString("Delete %1 objects").arg(ids.size()), [ids](Document& d) {
+        for (ObjectId id : ids)
+            if (d.contains(id)) d.remove(id);
+    });
 }
 
 void PlanView::mousePressEvent(QMouseEvent* e) {
@@ -1195,16 +1414,31 @@ void PlanView::mousePressEvent(QMouseEvent* e) {
     }
     if (e->button() != Qt::LeftButton) return;
 
+    // Shift starts a selection box with any tool; the box picks only what
+    // the tool draws.
+    if (e->modifiers() & Qt::ShiftModifier) {
+        drag_ = Drag::Box;
+        boxStart_ = boxEnd_ = pos;
+        boxAdds_ = e->modifiers() & Qt::ControlModifier;
+        update();
+        return;
+    }
+
     const Vec2 raw = toWorld(pos);
-    const Vec2 p = snap(raw, anchor_, e->modifiers());
+    Vec2 p = snap(raw, anchor_, e->modifiers());
+    if (tool_ == Tool::Dimension && !anchor2_)
+        if (auto hit = dimensionSnap(raw, e->modifiers())) p = *hit;
 
     switch (tool_) {
     case Tool::Select: {
-        // Grab a wall or beam end of the current selection first.
         const ObjectId sel = ws_->selection();
-        const Wall* sw = doc().wall(sel);
-        const Beam* sb = doc().beam(sel);
-        if (sw || sb) {
+        const bool several = ws_->selectedIds().size() > 1;
+        // Grab a node of a selected dimension, or a wall or beam end of the
+        // current selection first.
+        if (auto node = dimensionHandleAt(pos)) drag_ = *node;
+        const Wall* sw = several ? nullptr : doc().wall(sel);
+        const Beam* sb = several ? nullptr : doc().beam(sel);
+        if (drag_ == Drag::None && (sw || sb)) {
             const Vec2 a = sw ? sw->a : sb->a, b = sw ? sw->b : sb->b;
             if (QLineF(toScreen(a), pos).length() < kPickPixels) drag_ = Drag::EndA;
             else if (QLineF(toScreen(b), pos).length() < kPickPixels) drag_ = Drag::EndB;
@@ -1218,6 +1452,12 @@ void PlanView::mousePressEvent(QMouseEvent* e) {
             dragIndex_ = *edge;
         }
         cycleOnRelease_ = false;
+        if (drag_ == Drag::None && several) {
+            // Pressing on one of several selected objects drags them all.
+            const auto hits = pickAll(raw);
+            if (std::any_of(hits.begin(), hits.end(), [this](ObjectId id) { return ws_->isSelected(id); }))
+                drag_ = Drag::Move;
+        }
         if (drag_ == Drag::None) {
             const auto hits = pickAll(raw);
             ObjectId hit = hits.empty() ? kNoId : hits.front();
@@ -1334,16 +1574,39 @@ void PlanView::mouseMoveEvent(QMouseEvent* e) {
         update();
         return;
     }
+    if (drag_ == Drag::Box) {
+        boxEnd_ = pos;
+        update();
+        return;
+    }
     const Vec2 raw = toWorld(pos);
     const bool twoPoint = tool_ == Tool::Wall || tool_ == Tool::RoomDivider || tool_ == Tool::Beam ||
                           ((tool_ == Tool::RoofPlane || tool_ == Tool::Dimension) && !anchor2_);
     cursor_ = snap(raw, twoPoint ? anchor_ : std::nullopt, e->modifiers());
+    if (tool_ == Tool::Dimension && !anchor2_)
+        if (auto hit = dimensionSnap(raw, e->modifiers())) cursor_ = *hit;
 
     if (drag_ != Drag::None && preview_) {
         Document d = ws_->doc();
         const ObjectId sel = ws_->selection();
         const Vec2 delta = snap(raw, std::nullopt, e->modifiers()) - snap(dragStart_, std::nullopt, e->modifiers());
-        if (Wall* w = d.wall(sel)) {
+        if (ws_->selectedIds().size() > 1) {
+            moveObjects(d, ws_->selectedIds(), delta);
+        } else if (drag_ == Drag::DimA || drag_ == Drag::DimB) {
+            // Move one end of the dimension, and the matching end of its
+            // neighbors in the string so the string stays joined.
+            const Dimension& before = *ws_->doc().dimension(sel);
+            const Vec2 old = drag_ == Drag::DimA ? before.a : before.b;
+            const auto hit = dimensionSnap(raw, e->modifiers());
+            const Vec2 to = hit ? *hit : snap(raw, std::nullopt, e->modifiers());
+            for (ObjectId id : dimensionString(ws_->doc(), sel)) {
+                Dimension* x = d.dimension(id);
+                const bool isSel = id == sel;
+                if ((isSel && drag_ == Drag::DimA) || (!isSel && distance(x->a, old) < 0.5)) x->a = to;
+                if ((isSel && drag_ == Drag::DimB) || (!isSel && distance(x->b, old) < 0.5)) x->b = to;
+                x->automatic = false;
+            }
+        } else if (Wall* w = d.wall(sel)) {
             if (drag_ == Drag::Move) {
                 w->a += delta;
                 w->b += delta;
@@ -1378,10 +1641,17 @@ void PlanView::mouseMoveEvent(QMouseEvent* e) {
             post->position = snap(raw, std::nullopt, e->modifiers());
         } else if (ElevationPoint* ep = d.elevationPoint(sel)) {
             ep->position = snap(raw, std::nullopt, e->modifiers());
-        } else if (Dimension* dim = d.dimension(sel)) {
-            // Dragging a dimension slides its line toward or away from what it measures.
+        } else if (d.dimension(sel)) {
+            // Dragging a dimension slides its whole string toward or away from what it measures.
             const Dimension& before = *ws_->doc().dimension(sel);
-            dim->offset = std::round(before.offset + dot(raw - dragStart_, (before.b - before.a).normalized().perp()));
+            const Vec2 n = (before.b - before.a).normalized().perp();
+            const double target = std::round(before.offset + dot(raw - dragStart_, n));
+            const Vec2 shift = n * (target - before.offset);
+            for (ObjectId id : dimensionString(ws_->doc(), sel)) {
+                Dimension* x = d.dimension(id);
+                x->offset += dot(shift, (x->b - x->a).normalized().perp());
+                x->automatic = false;
+            }
         } else if (Opening* o = d.opening(sel)) {
             if (const Wall* w = d.wall(o->wallId))
                 o->offset = std::round(std::clamp(w->centerline().project(raw) * w->length(), o->width / 2,
@@ -1402,6 +1672,12 @@ void PlanView::mouseReleaseEvent(QMouseEvent* e) {
     }
     if (e->button() != Qt::LeftButton) return;
 
+    if (drag_ == Drag::Box) {
+        drag_ = Drag::None;
+        finishBox(boxStart_, e->position(), boxAdds_);
+        update();
+        return;
+    }
     if (drag_ == Drag::None && cycleOnRelease_) {
         cycleOnRelease_ = false;
         cycleStack();
@@ -1413,7 +1689,10 @@ void PlanView::mouseReleaseEvent(QMouseEvent* e) {
         if (preview_ && distance(toWorld(e->position()), dragStart_) * scale_ > 2.0) {
             Document result = std::move(*preview_);
             preview_.reset();
-            const char* text = kind == Drag::Move ? "Move" : kind == Drag::Vertex || kind == Drag::Edge ? "Reshape roof plane" : "Stretch";
+            const char* text = kind == Drag::Move                             ? "Move"
+                               : kind == Drag::Vertex || kind == Drag::Edge ? "Reshape roof plane"
+                               : kind == Drag::DimA || kind == Drag::DimB   ? "Move dimension end"
+                                                                            : "Stretch";
             ws_->edit(text, [&](Document& d) { d = std::move(result); });
         } else {
             preview_.reset();
