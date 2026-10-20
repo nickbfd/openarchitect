@@ -25,6 +25,8 @@ NLOHMANN_JSON_SERIALIZE_ENUM(RoofFraming, {{RoofFraming::Rafters, "rafters"}, {R
 NLOHMANN_JSON_SERIALIZE_ENUM(WallKind, {{WallKind::Exterior, "exterior"}, {WallKind::Interior, "interior"},
                                        {WallKind::RoomDivider, "roomDivider"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(DimensionTo, {{DimensionTo::FramingEdge, "framingEdge"}, {DimensionTo::FramingCenter, "framingCenter"}})
+NLOHMANN_JSON_SERIALIZE_ENUM(WallRoof, {{WallRoof::Sloped, "sloped"}, {WallRoof::FullGable, "fullGable"},
+                                       {WallRoof::HighShed, "highShed"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(Axis, {{Axis::X, "x"}, {Axis::Y, "y"}})
 NLOHMANN_JSON_SERIALIZE_ENUM(FloorSystemKind, {{FloorSystemKind::LevelFraming, "levelFraming"},
                                                {FloorSystemKind::Joists, "joists"},
@@ -41,8 +43,9 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Rect, min, max)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Level, id, name, elevation, wallHeight, floorThickness)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(WallType, id, name, kind, studDepth, studSpacing,
                                                 interiorFinish, sheathing, siding, insulated, insulation)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(WallRoofSettings, kind, pitch, overhang)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Wall, id, levelId, a, b, wallTypeId, thickness, height,
-                                                bearing, selfWeightPsf, roomDivider)
+                                                bearing, selfWeightPsf, roomDivider, roof)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Opening, id, wallId, kind, offset, width, height,
                                                 sillHeight, headerMemberId)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoomFloor, kind, joists, customJoistAxis, joistAxis, deadPsf,
@@ -58,13 +61,15 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Roof, id, levelId, style, footpr
                                                 ceilingDeadPsf, atticLivePsf, customSnow, snowPsf)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoofPlane, id, levelId, a, b, outline, highBearing, run,
                                                 pitch, overhang, deadPsf, framing, hasCeiling, ceilingDeadPsf,
-                                                atticLivePsf, customSnow, snowPsf)
+                                                atticLivePsf, customSnow, snowPsf, automatic)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoofDefaults, pitch, eaveOverhang, gableOverhang, framing, ceiling,
+                                                autoRebuild)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Post, id, levelId, position, memberId, height)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Beam, id, levelId, a, b, memberId)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Site, groundSnowPsf, exposureCe, thermalCt, importanceIs)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Document, name, site, levels, wallTypes, walls, openings,
                                                 rooms, platforms, roofs, roofPlanes, beams, posts,
-                                                dimensions, dimensionTo, autoRefreshDimensions, terrain, nextId)
+                                                dimensions, dimensionTo, autoRefreshDimensions, roofDefaults, terrain, nextId)
 
 namespace {
 

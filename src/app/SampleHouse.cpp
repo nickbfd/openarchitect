@@ -1,6 +1,7 @@
 #include "SampleHouse.h"
 
 #include "oa/core/dimensions.h"
+#include "oa/core/roof_builder.h"
 #include "oa/core/units.h"
 
 using namespace oa;
@@ -130,7 +131,7 @@ Document makeSampleHouse() {
     const ObjectId south2 = wall(d, l2, {0, 0}, {W, 0}, exterior);
     const ObjectId east2 = wall(d, l2, {W, 0}, {W, D}, exterior);
     const ObjectId north2 = wall(d, l2, {W, D}, {0, D}, exterior);
-    wall(d, l2, {0, D}, {0, 0}, exterior);
+    const ObjectId west2 = wall(d, l2, {0, D}, {0, 0}, exterior);
     wall(d, l2, {feet(20), 0}, {feet(20), D}, interior, false);
 
     opening(d, south2, OpeningKind::Window, feet(8), 48, 48, 36);
@@ -150,15 +151,14 @@ Document makeSampleHouse() {
     floor.livePsf = 40.0;
     d.platforms.push_back(floor);
 
-    Roof roof;
-    roof.id = d.newId();
-    roof.levelId = l2;
-    roof.style = RoofStyle::Gable;
-    roof.footprint = {{0, 0}, {W, D}};
-    roof.ridgeAxis = Axis::X;
-    roof.pitch = 6.0;
-    roof.overhang = 18.0;
-    d.roofs.push_back(roof);
+    // A gable roof built from the walls, as in Chief: the east and west
+    // walls are gables and the roof follows the walls when they move.
+    d.wall(east2)->roof.kind = WallRoof::FullGable;
+    d.wall(west2)->roof.kind = WallRoof::FullGable;
+    d.roofDefaults.pitch = 6.0;
+    d.roofDefaults.eaveOverhang = 18.0;
+    d.roofDefaults.gableOverhang = 12.0;
+    d.roofDefaults.autoRebuild = true;
     // The lot falls from north to south, a little below the first floor at the house.
     const struct { double x, y, z; } grade[] = {
         {-feet(15), D + feet(15), -6},  {W / 2, D + feet(15), -4},     {W + feet(15), D + feet(15), -8},
@@ -169,6 +169,7 @@ Document makeSampleHouse() {
 
     // Walls take their types' sizes, and the rooms above are matched to the walls.
     d.refresh();
+    buildRoof(d, l2);
     for (const ObjectId l : {l1, l2})
         for (Dimension dim : exteriorDimensions(d, l)) {
             dim.id = d.newId();

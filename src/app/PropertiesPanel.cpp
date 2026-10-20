@@ -314,6 +314,9 @@ void PropertiesPanel::showMany(const Ids& ids) {
                   [](Document& d, ObjectId id, double v) { d.wall(id)->height = v; });
         choiceAll("Bearing", {"No", "Yes"}, ids, [](const Document& d, ObjectId id) { return d.wall(id)->bearing ? 1 : 0; },
                   [](Document& d, ObjectId id, int v) { d.wall(id)->bearing = v == 1; });
+        choiceAll("Roof over them", {"Sloped roof plane", "Full gable wall", "High side of a shed"}, ids,
+                  [](const Document& d, ObjectId id) { return static_cast<int>(d.wall(id)->roof.kind); },
+                  [](Document& d, ObjectId id, int v) { d.wall(id)->roof.kind = static_cast<WallRoof>(v); });
     } else if (all([&](ObjectId id) { return doc.post(id) != nullptr; })) {
         heading(QString("%1 posts").arg(ids.size()));
         QStringList sizes;
@@ -542,8 +545,56 @@ void PropertiesPanel::showWall(const Wall& w) {
     }
     length("Height (0 = level)", w.height, [id](Document& d, double v) { d.wall(id)->height = v; });
     check("Bearing", w.bearing, [id](Document& d, bool v) { d.wall(id)->bearing = v; });
+    if (!w.roomDivider) showWallRoof(w);
     if (type) showWallType(w, *type);
     if (w.bearing) showLoadBreakdown(id);
+}
+
+// What Build Roof does over this wall, like the Roof panel of Chief's wall
+// specification.
+void PropertiesPanel::showWallRoof(const Wall& w) {
+    const ObjectId id = w.id;
+    const RoofDefaults& defaults = ws_->doc().roofDefaults;
+    heading("Roof");
+    choice("Over this wall", {"Sloped roof plane", "Full gable wall", "High side of a shed"},
+           static_cast<int>(w.roof.kind), [id](Document& d, int v) { d.wall(id)->roof.kind = static_cast<WallRoof>(v); });
+    auto* pitch = new QDoubleSpinBox;
+    pitch->setRange(0, 24);
+    pitch->setDecimals(2);
+    pitch->setSingleStep(0.5);
+    pitch->setSuffix(" in 12");
+    pitch->setSpecialValueText(QString("Default (%1 in 12)").arg(defaults.pitch));
+    pitch->setValue(w.roof.pitch);
+    pitch->setKeyboardTracking(false);
+    const double oldPitch = w.roof.pitch;
+    connect(pitch, &QDoubleSpinBox::editingFinished, this, [this, pitch, id, oldPitch] {
+        const double v = pitch->value();
+        if (std::abs(v - oldPitch) < 1e-9) return;
+        apply("Change roof pitch", [id, v](Document& d) { d.wall(id)->roof.pitch = v; });
+    });
+    form_->addRow("Pitch", pitch);
+
+    const bool gable = w.roof.kind != WallRoof::Sloped;
+    const double fallback = gable ? defaults.gableOverhang : defaults.eaveOverhang;
+    auto* overhang = new QLineEdit(w.roof.overhang >= 0 ? feetInches(w.roof.overhang) : QString());
+    overhang->setPlaceholderText(QString("Default (%1)").arg(feetInches(fallback)));
+    overhang->setToolTip("Leave empty to use the Build roof overhang");
+    const QString shown = overhang->text();
+    connect(overhang, &QLineEdit::editingFinished, this, [this, overhang, id, shown] {
+        if (overhang->text() == shown) return;
+        double v = -1.0;
+        if (!overhang->text().trimmed().isEmpty()) {
+            const auto parsed = parseLength(overhang->text().toStdString());
+            if (!parsed || *parsed < 0) {
+                overhang->setText(shown);
+                return;
+            }
+            v = *parsed;
+        }
+        apply("Change roof overhang", [id, v](Document& d) { d.wall(id)->roof.overhang = v; });
+    });
+    form_->addRow(gable ? "Rake overhang" : "Eave overhang", overhang);
+    note("<span style='color:#666'>Roofs > Build roof makes the roof from these settings on every exterior wall.</span>");
 }
 
 // The wall type's framing and layers. Changing them changes every wall of the type.
@@ -705,6 +756,9 @@ void PropertiesPanel::showRoof(const Roof& r) {
 void PropertiesPanel::showRoofPlane(const RoofPlane& p) {
     const ObjectId id = p.id;
     heading(QString("Roof plane %1").arg(id));
+    if (p.automatic)
+        note("<span style='color:#666'>Built from the walls by Build roof. Change the walls' roof settings and build "
+             "again, or edit this plane by hand (that turns off automatic rebuilding).</span>");
     info("Slopes down toward", "the " + compass(p.upslope() * -1.0));
     info("Bearing line", feetInches(distance(p.a, p.b)));
     info("Width", feetInches(p.width()));

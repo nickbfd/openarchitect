@@ -41,7 +41,7 @@
           96.0,
           -2.40625
         ],
-        "id": 58,
+        "id": 59,
         "levelId": 6,
         "offset": -96.59375
       },
@@ -55,7 +55,7 @@
           240.0,
           -2.40625
         ],
-        "id": 59,
+        "id": 60,
         "levelId": 6,
         "offset": -96.59375
       },
@@ -69,7 +69,7 @@
           384.0,
           -2.40625
         ],
-        "id": 60,
+        "id": 61,
         "levelId": 6,
         "offset": -96.59375
       },
@@ -83,7 +83,7 @@
           482.40625,
           -2.40625
         ],
-        "id": 61,
+        "id": 62,
         "levelId": 6,
         "offset": -96.59375
       },
@@ -97,7 +97,7 @@
           482.40625,
           -2.40625
         ],
-        "id": 62,
+        "id": 63,
         "levelId": 6,
         "offset": -120.59375
       },
@@ -111,7 +111,7 @@
           482.40625,
           84.0
         ],
-        "id": 63,
+        "id": 64,
         "levelId": 6,
         "offset": -25.1875
       },
@@ -125,7 +125,7 @@
           482.40625,
           338.40625
         ],
-        "id": 64,
+        "id": 65,
         "levelId": 6,
         "offset": -25.1875
       },
@@ -139,7 +139,7 @@
           482.40625,
           338.40625
         ],
-        "id": 65,
+        "id": 66,
         "levelId": 6,
         "offset": -49.1875
       },
@@ -153,7 +153,7 @@
           120.0,
           338.40625
         ],
-        "id": 66,
+        "id": 67,
         "levelId": 6,
         "offset": 25.1875
       },
@@ -167,27 +167,13 @@
           336.0,
           338.40625
         ],
-        "id": 67,
-        "levelId": 6,
-        "offset": 25.1875
-      },
-      {
-        "a": [
-          336.0,
-          338.40625
-        ],
-        "automatic": true,
-        "b": [
-          482.40625,
-          338.40625
-        ],
         "id": 68,
         "levelId": 6,
         "offset": 25.1875
       },
       {
         "a": [
-          -2.40625,
+          336.0,
           338.40625
         ],
         "automatic": true,
@@ -197,6 +183,20 @@
         ],
         "id": 69,
         "levelId": 6,
+        "offset": 25.1875
+      },
+      {
+        "a": [
+          -2.40625,
+          338.40625
+        ],
+        "automatic": true,
+        "b": [
+          482.40625,
+          338.40625
+        ],
+        "id": 70,
+        "levelId": 6,
         "offset": 49.1875
       },
       {
@@ -208,20 +208,6 @@
         "b": [
           -2.40625,
           252.0
-        ],
-        "id": 70,
-        "levelId": 6,
-        "offset": 25.1875
-      },
-      {
-        "a": [
-          -2.40625,
-          252.0
-        ],
-        "automatic": true,
-        "b": [
-          -2.40625,
-          338.40625
         ],
         "id": 71,
         "levelId": 6,
@@ -230,7 +216,7 @@
       {
         "a": [
           -2.40625,
-          -2.40625
+          252.0
         ],
         "automatic": true,
         "b": [
@@ -238,6 +224,20 @@
           338.40625
         ],
         "id": 72,
+        "levelId": 6,
+        "offset": 25.1875
+      },
+      {
+        "a": [
+          -2.40625,
+          -2.40625
+        ],
+        "automatic": true,
+        "b": [
+          -2.40625,
+          338.40625
+        ],
+        "id": 73,
         "levelId": 6,
         "offset": 49.1875
       },
@@ -251,7 +251,7 @@
           96.0,
           -2.40625
         ],
-        "id": 73,
+        "id": 74,
         "levelId": 7,
         "offset": -25.1875
       },
@@ -265,27 +265,13 @@
           384.0,
           -2.40625
         ],
-        "id": 74,
-        "levelId": 7,
-        "offset": -25.1875
-      },
-      {
-        "a": [
-          384.0,
-          -2.40625
-        ],
-        "automatic": true,
-        "b": [
-          482.40625,
-          -2.40625
-        ],
         "id": 75,
         "levelId": 7,
         "offset": -25.1875
       },
       {
         "a": [
-          -2.40625,
+          384.0,
           -2.40625
         ],
         "automatic": true,
@@ -295,6 +281,20 @@
         ],
         "id": 76,
         "levelId": 7,
+        "offset": -25.1875
+      },
+      {
+        "a": [
+          -2.40625,
+          -2.40625
+        ],
+        "automatic": true,
+        "b": [
+          482.40625,
+          -2.40625
+        ],
+        "id": 77,
+        "levelId": 7,
         "offset": -49.1875
       },
       {
@@ -306,20 +306,6 @@
         "b": [
           482.40625,
           168.0
-        ],
-        "id": 77,
-        "levelId": 7,
-        "offset": -25.1875
-      },
-      {
-        "a": [
-          482.40625,
-          168.0
-        ],
-        "automatic": true,
-        "b": [
-          482.40625,
-          338.40625
         ],
         "id": 78,
         "levelId": 7,
@@ -328,7 +314,7 @@
       {
         "a": [
           482.40625,
-          -2.40625
+          168.0
         ],
         "automatic": true,
         "b": [
@@ -336,6 +322,20 @@
           338.40625
         ],
         "id": 79,
+        "levelId": 7,
+        "offset": -25.1875
+      },
+      {
+        "a": [
+          482.40625,
+          -2.40625
+        ],
+        "automatic": true,
+        "b": [
+          482.40625,
+          338.40625
+        ],
+        "id": 80,
         "levelId": 7,
         "offset": -49.1875
       },
@@ -349,7 +349,7 @@
           120.0,
           338.40625
         ],
-        "id": 80,
+        "id": 81,
         "levelId": 7,
         "offset": 25.1875
       },
@@ -363,7 +363,7 @@
           360.0,
           338.40625
         ],
-        "id": 81,
+        "id": 82,
         "levelId": 7,
         "offset": 25.1875
       },
@@ -377,7 +377,7 @@
           482.40625,
           338.40625
         ],
-        "id": 82,
+        "id": 83,
         "levelId": 7,
         "offset": 25.1875
       },
@@ -391,7 +391,7 @@
           482.40625,
           338.40625
         ],
-        "id": 83,
+        "id": 84,
         "levelId": 7,
         "offset": 49.1875
       },
@@ -405,7 +405,7 @@
           -2.40625,
           338.40625
         ],
-        "id": 84,
+        "id": 85,
         "levelId": 7,
         "offset": 25.1875
       }
@@ -427,7 +427,7 @@
       }
     ],
     "name": "Sample house",
-    "nextId": 85,
+    "nextId": 86,
     "openings": [
       {
         "headerMemberId": "",
@@ -591,6 +591,14 @@
         ]
       }
     ],
+    "roofDefaults": {
+      "autoRebuild": true,
+      "ceiling": true,
+      "eaveOverhang": 18.0,
+      "framing": "rafters",
+      "gableOverhang": 12.0,
+      "pitch": 6.0
+    },
     "roofPlanes": [
       {
         "a": [
@@ -598,6 +606,7 @@
           -72.0
         ],
         "atticLivePsf": 10.0,
+        "automatic": false,
         "b": [
           192.0,
           -72.0
@@ -632,36 +641,93 @@
         "pitch": 3.0,
         "run": 0.0,
         "snowPsf": 0.0
-      }
-    ],
-    "roofs": [
+      },
       {
+        "a": [
+          0.0,
+          0.0
+        ],
         "atticLivePsf": 10.0,
+        "automatic": true,
+        "b": [
+          480.0,
+          0.0
+        ],
         "ceilingDeadPsf": 10.0,
         "customSnow": false,
         "deadPsf": 15.0,
-        "footprint": {
-          "max": [
-            480.0,
-            336.0
-          ],
-          "min": [
-            0.0,
-            0.0
-          ]
-        },
         "framing": "rafters",
         "hasCeiling": true,
-        "id": 48,
+        "highBearing": false,
+        "id": 57,
         "levelId": 7,
+        "outline": [
+          [
+            -12.0,
+            -18.0
+          ],
+          [
+            492.0,
+            -18.0
+          ],
+          [
+            492.0,
+            168.0
+          ],
+          [
+            -12.0,
+            168.0
+          ]
+        ],
         "overhang": 18.0,
         "pitch": 6.0,
-        "ridgeAxis": "x",
-        "snowPsf": 0.0,
-        "structuralRidge": false,
-        "style": "gable"
+        "run": 0.0,
+        "snowPsf": 0.0
+      },
+      {
+        "a": [
+          480.0,
+          336.0
+        ],
+        "atticLivePsf": 10.0,
+        "automatic": true,
+        "b": [
+          0.0,
+          336.0
+        ],
+        "ceilingDeadPsf": 10.0,
+        "customSnow": false,
+        "deadPsf": 15.0,
+        "framing": "rafters",
+        "hasCeiling": true,
+        "highBearing": false,
+        "id": 58,
+        "levelId": 7,
+        "outline": [
+          [
+            492.0,
+            354.0
+          ],
+          [
+            -12.0,
+            354.0
+          ],
+          [
+            -12.0,
+            168.0
+          ],
+          [
+            492.0,
+            168.0
+          ]
+        ],
+        "overhang": 18.0,
+        "pitch": 6.0,
+        "run": 0.0,
+        "snowPsf": 0.0
       }
     ],
+    "roofs": [],
     "rooms": [
       {
         "floor": {
@@ -920,7 +986,7 @@
       "points": [
         {
           "elevation": -6.0,
-          "id": 49,
+          "id": 48,
           "position": [
             -180.0,
             516.0
@@ -928,9 +994,17 @@
         },
         {
           "elevation": -4.0,
-          "id": 50,
+          "id": 49,
           "position": [
             240.0,
+            516.0
+          ]
+        },
+        {
+          "elevation": -8.0,
+          "id": 50,
+          "position": [
+            660.0,
             516.0
           ]
         },
@@ -938,21 +1012,13 @@
           "elevation": -8.0,
           "id": 51,
           "position": [
-            660.0,
-            516.0
-          ]
-        },
-        {
-          "elevation": -8.0,
-          "id": 52,
-          "position": [
             -180.0,
             168.0
           ]
         },
         {
           "elevation": -10.0,
-          "id": 53,
+          "id": 52,
           "position": [
             660.0,
             168.0
@@ -960,7 +1026,7 @@
         },
         {
           "elevation": -30.0,
-          "id": 54,
+          "id": 53,
           "position": [
             -180.0,
             -240.0
@@ -968,7 +1034,7 @@
         },
         {
           "elevation": -36.0,
-          "id": 55,
+          "id": 54,
           "position": [
             240.0,
             -240.0
@@ -976,7 +1042,7 @@
         },
         {
           "elevation": -40.0,
-          "id": 56,
+          "id": 55,
           "position": [
             660.0,
             -240.0
@@ -984,7 +1050,7 @@
         },
         {
           "elevation": -10.0,
-          "id": 57,
+          "id": 56,
           "position": [
             96.0,
             -120.0
@@ -1068,6 +1134,11 @@
         "height": 0.0,
         "id": 8,
         "levelId": 6,
+        "roof": {
+          "kind": "sloped",
+          "overhang": -1.0,
+          "pitch": 0.0
+        },
         "roomDivider": false,
         "selfWeightPsf": 8.5514453125,
         "thickness": 7.1875,
@@ -1086,6 +1157,11 @@
         "height": 0.0,
         "id": 9,
         "levelId": 6,
+        "roof": {
+          "kind": "sloped",
+          "overhang": -1.0,
+          "pitch": 0.0
+        },
         "roomDivider": false,
         "selfWeightPsf": 8.5514453125,
         "thickness": 7.1875,
@@ -1104,6 +1180,11 @@
         "height": 0.0,
         "id": 10,
         "levelId": 6,
+        "roof": {
+          "kind": "sloped",
+          "overhang": -1.0,
+          "pitch": 0.0
+        },
         "roomDivider": false,
         "selfWeightPsf": 8.5514453125,
         "thickness": 7.1875,
@@ -1122,6 +1203,11 @@
         "height": 0.0,
         "id": 11,
         "levelId": 6,
+        "roof": {
+          "kind": "sloped",
+          "overhang": -1.0,
+          "pitch": 0.0
+        },
         "roomDivider": false,
         "selfWeightPsf": 8.5514453125,
         "thickness": 7.1875,
@@ -1140,6 +1226,11 @@
         "height": 0.0,
         "id": 12,
         "levelId": 6,
+        "roof": {
+          "kind": "sloped",
+          "overhang": -1.0,
+          "pitch": 0.0
+        },
         "roomDivider": false,
         "selfWeightPsf": 5.9791015625,
         "thickness": 4.5,
@@ -1158,6 +1249,11 @@
         "height": 0.0,
         "id": 13,
         "levelId": 6,
+        "roof": {
+          "kind": "sloped",
+          "overhang": -1.0,
+          "pitch": 0.0
+        },
         "roomDivider": false,
         "selfWeightPsf": 5.9791015625,
         "thickness": 4.5,
@@ -1176,6 +1272,11 @@
         "height": 0.0,
         "id": 14,
         "levelId": 6,
+        "roof": {
+          "kind": "sloped",
+          "overhang": -1.0,
+          "pitch": 0.0
+        },
         "roomDivider": true,
         "selfWeightPsf": 0.0,
         "thickness": 0.0,
@@ -1194,6 +1295,11 @@
         "height": 0.0,
         "id": 31,
         "levelId": 6,
+        "roof": {
+          "kind": "sloped",
+          "overhang": -1.0,
+          "pitch": 0.0
+        },
         "roomDivider": true,
         "selfWeightPsf": 0.0,
         "thickness": 0.0,
@@ -1212,6 +1318,11 @@
         "height": 0.0,
         "id": 32,
         "levelId": 6,
+        "roof": {
+          "kind": "sloped",
+          "overhang": -1.0,
+          "pitch": 0.0
+        },
         "roomDivider": true,
         "selfWeightPsf": 0.0,
         "thickness": 0.0,
@@ -1230,6 +1341,11 @@
         "height": 0.0,
         "id": 33,
         "levelId": 6,
+        "roof": {
+          "kind": "sloped",
+          "overhang": -1.0,
+          "pitch": 0.0
+        },
         "roomDivider": true,
         "selfWeightPsf": 0.0,
         "thickness": 0.0,
@@ -1248,6 +1364,11 @@
         "height": 0.0,
         "id": 35,
         "levelId": 7,
+        "roof": {
+          "kind": "sloped",
+          "overhang": -1.0,
+          "pitch": 0.0
+        },
         "roomDivider": false,
         "selfWeightPsf": 8.5514453125,
         "thickness": 7.1875,
@@ -1266,6 +1387,11 @@
         "height": 0.0,
         "id": 36,
         "levelId": 7,
+        "roof": {
+          "kind": "fullGable",
+          "overhang": -1.0,
+          "pitch": 0.0
+        },
         "roomDivider": false,
         "selfWeightPsf": 8.5514453125,
         "thickness": 7.1875,
@@ -1284,6 +1410,11 @@
         "height": 0.0,
         "id": 37,
         "levelId": 7,
+        "roof": {
+          "kind": "sloped",
+          "overhang": -1.0,
+          "pitch": 0.0
+        },
         "roomDivider": false,
         "selfWeightPsf": 8.5514453125,
         "thickness": 7.1875,
@@ -1302,6 +1433,11 @@
         "height": 0.0,
         "id": 38,
         "levelId": 7,
+        "roof": {
+          "kind": "fullGable",
+          "overhang": -1.0,
+          "pitch": 0.0
+        },
         "roomDivider": false,
         "selfWeightPsf": 8.5514453125,
         "thickness": 7.1875,
@@ -1320,6 +1456,11 @@
         "height": 0.0,
         "id": 39,
         "levelId": 7,
+        "roof": {
+          "kind": "sloped",
+          "overhang": -1.0,
+          "pitch": 0.0
+        },
         "roomDivider": false,
         "selfWeightPsf": 5.9791015625,
         "thickness": 4.5,

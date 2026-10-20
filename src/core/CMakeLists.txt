@@ -6,6 +6,7 @@ add_library(oa_core
     src/terrain.cpp
     src/dimensions.cpp
     src/editing.cpp
+    src/roof_builder.cpp
     src/undo.cpp
     src/serialization.cpp
 )

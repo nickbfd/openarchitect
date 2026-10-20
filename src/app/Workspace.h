@@ -65,6 +65,8 @@ signals:
     void selectionChanged();
     void currentLevelChanged();
     void modifiedChanged(bool modified);
+    // Something people should know about an edit, for the status bar.
+    void notice(const QString& text);
 
 private:
     void replaceDocument(const oa::Document& doc);
