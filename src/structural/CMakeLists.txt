@@ -6,6 +6,7 @@ add_library(oa_structural
     src/sizing.cpp
     src/posts.cpp
     src/takedown.cpp
+    src/rafters.cpp
 )
 add_library(oa::structural ALIAS oa_structural)
 

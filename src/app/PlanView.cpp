@@ -967,7 +967,8 @@ void PlanView::drawRoofPlanes(QPainter& g) const {
     const bool hasAuto = std::any_of(d.roofPlanes.begin(), d.roofPlanes.end(),
                                      [&](const RoofPlane& r) { return r.automatic && r.levelId == level; });
     const bool hasSettings = std::any_of(d.walls.begin(), d.walls.end(), [&](const Wall& w) {
-        return w.levelId == level && (w.roof.kind != WallRoof::Sloped || w.roof.pitch > 0 || w.roof.overhang >= 0);
+        return w.levelId == level &&
+               (w.roof.kind != WallRoof::Sloped || w.roof.pitch > 0 || w.roof.overhang >= 0 || w.roof.upperPitch > 0);
     });
     if (hasAuto || hasSettings) {
         QFont small = g.font();
@@ -979,13 +980,21 @@ void PlanView::drawRoofPlanes(QPainter& g) const {
             const Wall* w = d.wall(e.wallId);
             if (!w) continue;
             const double pitch = w->roof.pitch > 0 ? w->roof.pitch : d.roofDefaults.pitch;
-            const QString text = w->roof.kind == WallRoof::FullGable  ? QString("Gable")
-                                 : w->roof.kind == WallRoof::HighShed ? QString("High shed")
-                                                                      : QString("%1/12").arg(pitch);
+            const QString start = QString::fromStdString(formatFeetInches(w->roof.upperStart, 1));
+            QString text = w->roof.kind == WallRoof::FullGable    ? QString("Gable")
+                           : w->roof.kind == WallRoof::HighShed   ? QString("High shed")
+                           : w->roof.kind == WallRoof::DutchGable ? QString("%1/12, Dutch gable at %2").arg(pitch).arg(start)
+                                                                  : QString("%1/12").arg(pitch);
+            if (w->roof.hasUpperPitch())
+                text = w->roof.kind == WallRoof::FullGable
+                           ? QString("Gable, half hip %1/12 at %2").arg(w->roof.upperPitch).arg(start)
+                           : QString("%1/12, then %2/12 at %3").arg(pitch).arg(w->roof.upperPitch).arg(start);
             // Just inside the wall, clear of the dimensions outside.
             const Vec2 inside = (e.b - e.a).normalized().perp() * (w->thickness / 2.0 + 14.0 / scale_);
             const QPointF a = toScreen(e.a + inside), b = toScreen(e.b + inside);
-            drawAlong(g, (a + b) / 2.0, b - a, text, -8.0); // centered on the line
+            // A third of the way along, clear of the planes' slope arrows in the middle.
+            const QPointF from = (a.x() < b.x() - 0.5 || (std::abs(a.x() - b.x()) <= 0.5 && a.y() < b.y())) ? a : b;
+            drawAlong(g, from + ((from == a ? b : a) - from) * 0.3, b - a, text, -8.0);
         }
         g.restore();
     }
@@ -999,14 +1008,20 @@ void PlanView::drawRoofPlanes(QPainter& g) const {
         g.setPen(QPen(color, selected ? 2 : 1, Qt::DashLine));
         g.setBrush(selected ? QColor(30, 110, 220, 30) : QColor(150, 60, 60, 18));
         g.drawPolygon(poly);
-        // The bearing line along the eave wall or beam.
+        // The bearing line along the eave wall or beam. An upper plane
+        // (gambrel, half hip) starts above it instead.
         g.setPen(QPen(color, selected ? 2 : 1));
-        g.drawLine(toScreen(r.a), toScreen(r.b));
+        if (r.baseHeight <= 0.0) g.drawLine(toScreen(r.a), toScreen(r.b));
 
         // Arrow pointing downhill from the middle of the plane.
         const Vec2 up = r.upslope();
         const Vec2 mid = centroid(r.outline);
-        const double arrow = std::min(r.runLength() * 0.3, 48.0);
+        double upLo = 1e30, upHi = -1e30;
+        for (Vec2 p : r.outline) {
+            upLo = std::min(upLo, r.upFrom(p));
+            upHi = std::max(upHi, r.upFrom(p));
+        }
+        const double arrow = std::min((upHi - std::max(upLo, 0.0)) * 0.3, 48.0);
         const Vec2 tip = mid - up * arrow;
         g.drawLine(toScreen(mid + up * arrow), toScreen(tip));
         const Vec2 along = r.along();
@@ -1015,8 +1030,15 @@ void PlanView::drawRoofPlanes(QPainter& g) const {
         arrowHead << toScreen(tip) << toScreen(tip + up * head + along * head * 0.6) << toScreen(tip + up * head - along * head * 0.6);
         g.setBrush(color);
         g.drawPolygon(arrowHead);
-        g.drawText(toScreen(mid + up * arrow) + QPointF(6, 0),
-                   QString("%1/12%2").arg(r.pitch).arg(r.highBearing ? "" : ", to ridge"));
+        // Beside the arrow's middle, so labels of narrow planes (a gambrel's) stay apart.
+        const QPointF labelAt = toScreen(mid) + QPointF(8, -2);
+        g.drawText(labelAt, QString("%1/12%2").arg(r.pitch).arg(r.highBearing ? "" : ", to ridge"));
+        // The framing, like Chief's rafter callouts: size and spacing.
+        const QString spacing = QString::number(r.rafterSpacing) + "\"";
+        g.drawText(labelAt + QPointF(0, g.fontMetrics().height()),
+                   r.framing == RoofFraming::Trusses
+                       ? QString("Trusses @ %1 o.c.").arg(spacing)
+                       : QString("%1 @ %2 o.c.").arg(QString::fromStdString(lumberSize(r.rafterMemberId)), spacing));
 
         if (!selected || ws_->selectedIds().size() != 1) continue;
         // Handles: squares at the corners, diamonds mid-edge, with each edge's length.

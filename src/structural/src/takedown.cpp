@@ -307,9 +307,12 @@ private:
                 return out;
             }
             const double run = hi, o = std::max(-lo, -run);
+            // The ceiling under it, less what a plane below already covers
+            // (the upper plane of a gambrel starts at the break).
+            const double ceilingRun = run - std::max(lo, 0.0);
             if (!plane.highBearing) {
                 out.eave = psf * ((run + o) / 12.0);
-                if (plane.hasCeiling) out.eaveCeiling = ceiling * (run / 12.0);
+                if (plane.hasCeiling) out.eaveCeiling = ceiling * (ceilingRun / 12.0);
                 return out;
             }
             if (o >= run) {

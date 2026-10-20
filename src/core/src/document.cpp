@@ -51,6 +51,46 @@ std::vector<WallType> defaultWallTypes() {
     };
 }
 
+double sawnLumberDepth(const std::string& memberId) {
+    // The size is the last part of a catalog id, like "2x8" in "dfl-no2-1-2x8".
+    const std::string size = lumberSize(memberId);
+    const auto x = size.find('x');
+    if (x == std::string::npos) return 0.0;
+    const std::string thick = size.substr(0, x);
+    if (thick != "2" && thick != "3" && thick != "4" && thick != "6") return 0.0;
+    int nominal = 0;
+    try {
+        nominal = std::stoi(size.substr(x + 1));
+    } catch (...) {
+        return 0.0;
+    }
+    if (nominal <= 0) return 0.0;
+    if (nominal <= 6) return nominal - 0.5;
+    return nominal - 0.75;
+}
+
+std::string lumberSize(const std::string& memberId) {
+    const auto dash = memberId.rfind('-');
+    return dash == std::string::npos ? memberId : memberId.substr(dash + 1);
+}
+
+double RoofSettings::rafterDepth() const {
+    if (framing == RoofFraming::Trusses) return 3.5;
+    const double d = sawnLumberDepth(rafterMemberId);
+    return d > 0.0 ? d : 7.25;
+}
+
+double RoofSettings::effectiveHeel() const {
+    if (heelHeight > 0.0) return heelHeight;
+    const double plumb = 1.0 / std::cos(slopeRadians());
+    if (framing == RoofFraming::Trusses) return 3.5 + 3.5 * plumb;
+    return rafterDepth() * plumb * 2.0 / 3.0;
+}
+
+double RoofSettings::surfaceAbovePlate() const {
+    return effectiveHeel() + std::max(sheathingThickness, 0.0) / std::cos(slopeRadians());
+}
+
 double RoofPlane::width() const {
     if (outline.empty()) return 0.0;
     double lo = 1e30, hi = -1e30;
@@ -263,7 +303,7 @@ double plateHeight(const Document& doc, ObjectId levelId) {
 }
 
 double roofPlaneHeight(const Document& doc, const RoofPlane& plane, Vec2 p) {
-    return plateHeight(doc, plane.levelId) + plane.riseAt(p);
+    return plateHeight(doc, plane.levelId) + plane.surfaceAbovePlate() + plane.riseAt(p);
 }
 
 Polygon joinRoofPlanes(const Document& doc, const RoofPlane& plane, int edge, const RoofPlane& other) {
@@ -271,7 +311,7 @@ Polygon joinRoofPlanes(const Document& doc, const RoofPlane& plane, int edge, co
     auto coefficients = [&](const RoofPlane& r, Vec2& g, double& c) {
         const double slope = r.pitch / 12.0;
         g = r.upslope() * slope;
-        c = plateHeight(doc, r.levelId) - dot(r.a, g);
+        c = roofPlaneHeight(doc, r, r.a) - dot(r.a, g);
     };
     Vec2 g1, g2;
     double c1, c2;

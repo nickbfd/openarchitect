@@ -7,6 +7,7 @@
 #include "oa/core/units.h"
 #include "oa/structural/members.h"
 #include "oa/structural/posts.h"
+#include "oa/structural/rafters.h"
 #include "oa/structural/snow.h"
 
 #include <QCheckBox>
@@ -28,6 +29,13 @@ using namespace oa::structural;
 
 namespace {
 QString feetInches(double inches) { return QString::fromStdString(formatFeetInches(inches, 16)); }
+
+// Short lengths in inches alone, like 8 11/16".
+QString shortLength(double inches) {
+    QString s = feetInches(inches);
+    if (s.startsWith("0'-")) s.remove(0, 3);
+    return s;
+}
 
 QString plf(double v) { return v > 0.5 ? QString::number(v, 'f', 0) : QString("&ndash;"); }
 
@@ -314,7 +322,7 @@ void PropertiesPanel::showMany(const Ids& ids) {
                   [](Document& d, ObjectId id, double v) { d.wall(id)->height = v; });
         choiceAll("Bearing", {"No", "Yes"}, ids, [](const Document& d, ObjectId id) { return d.wall(id)->bearing ? 1 : 0; },
                   [](Document& d, ObjectId id, int v) { d.wall(id)->bearing = v == 1; });
-        choiceAll("Roof over them", {"Sloped roof plane", "Full gable wall", "High side of a shed"}, ids,
+        choiceAll("Roof over them", {"Sloped roof plane", "Full gable wall", "High side of a shed", "Dutch gable"}, ids,
                   [](const Document& d, ObjectId id) { return static_cast<int>(d.wall(id)->roof.kind); },
                   [](Document& d, ObjectId id, int v) { d.wall(id)->roof.kind = static_cast<WallRoof>(v); });
     } else if (all([&](ObjectId id) { return doc.post(id) != nullptr; })) {
@@ -556,7 +564,7 @@ void PropertiesPanel::showWallRoof(const Wall& w) {
     const ObjectId id = w.id;
     const RoofDefaults& defaults = ws_->doc().roofDefaults;
     heading("Roof");
-    choice("Over this wall", {"Sloped roof plane", "Full gable wall", "High side of a shed"},
+    choice("Over this wall", {"Sloped roof plane", "Full gable wall", "High side of a shed", "Dutch gable"},
            static_cast<int>(w.roof.kind), [id](Document& d, int v) { d.wall(id)->roof.kind = static_cast<WallRoof>(v); });
     auto* pitch = new QDoubleSpinBox;
     pitch->setRange(0, 24);
@@ -573,8 +581,29 @@ void PropertiesPanel::showWallRoof(const Wall& w) {
         apply("Change roof pitch", [id, v](Document& d) { d.wall(id)->roof.pitch = v; });
     });
     form_->addRow("Pitch", pitch);
+    if (w.roof.kind == WallRoof::FullGable) pitch->setEnabled(false);
 
-    const bool gable = w.roof.kind != WallRoof::Sloped;
+    // A second pitch partway up, like Chief's Upper Pitch: a gambrel or gull
+    // wing over a sloped wall, a half hip over a gable wall.
+    if (w.roof.kind == WallRoof::Sloped || w.roof.kind == WallRoof::FullGable) {
+        number("Upper pitch (0 = none)", w.roof.upperPitch, 0, 24, 2, " in 12",
+               [id](Document& d, double v) { d.wall(id)->roof.upperPitch = v; });
+        if (w.roof.upperPitch > 0) {
+            length("Upper pitch starts", w.roof.upperStart, [id](Document& d, double v) { d.wall(id)->roof.upperStart = v; }, 1.0);
+            const double lower = w.roof.pitch > 0 ? w.roof.pitch : defaults.pitch;
+            const QString style = w.roof.kind == WallRoof::FullGable ? "a half hip (clipped gable)"
+                                  : w.roof.upperPitch < lower       ? "a gambrel, or a mansard when every wall has it"
+                                                                    : "a gull wing";
+            note(QString("<span style='color:#666'>Makes %1. The height is above the top of the wall plate.</span>").arg(style));
+        }
+    }
+    if (w.roof.kind == WallRoof::DutchGable) {
+        length("Gable starts", w.roof.upperStart, [id](Document& d, double v) { d.wall(id)->roof.upperStart = v; }, 1.0);
+        note("<span style='color:#666'>The roof hips up from this wall to that height above the plate, then stands "
+             "up as a gable.</span>");
+    }
+
+    const bool gable = w.roof.kind == WallRoof::FullGable || w.roof.kind == WallRoof::HighShed;
     const double fallback = gable ? defaults.gableOverhang : defaults.eaveOverhang;
     auto* overhang = new QLineEdit(w.roof.overhang >= 0 ? feetInches(w.roof.overhang) : QString());
     overhang->setPlaceholderText(QString("Default (%1)").arg(feetInches(fallback)));
@@ -757,8 +786,9 @@ void PropertiesPanel::showRoofPlane(const RoofPlane& p) {
     const ObjectId id = p.id;
     heading(QString("Roof plane %1").arg(id));
     if (p.automatic)
-        note("<span style='color:#666'>Built from the walls by Build roof. Change the walls' roof settings and build "
-             "again, or edit this plane by hand (that turns off automatic rebuilding).</span>");
+        note("<span style='color:#666'>Built from the walls by Build roof. Change the walls' roof settings to change "
+             "its shape. Its framing, sheathing and loads stay as set here when the roof rebuilds; reshaping it by "
+             "hand turns off automatic rebuilding.</span>");
     info("Slopes down toward", "the " + compass(p.upslope() * -1.0));
     info("Bearing line", feetInches(distance(p.a, p.b)));
     info("Width", feetInches(p.width()));
@@ -800,6 +830,7 @@ void PropertiesPanel::showRoofSettings(ObjectId id, const RoofSettings& r, bool 
            [id](Document& d, int v) { d.roofSettings(id)->framing = v == 0 ? RoofFraming::Rafters : RoofFraming::Trusses; });
     number("Pitch", r.pitch, 0.25, 24, 2, " in 12", [id](Document& d, double v) { d.roofSettings(id)->pitch = v; });
     if (!plane) length("Overhang", r.overhang, [id](Document& d, double v) { d.roofSettings(id)->overhang = v; });
+    showRoofFraming(id, r, plane);
 
     heading("Roof loads");
     number("Dead load", r.deadPsf, 0, 100, 1, " psf", [id](Document& d, double v) { d.roofSettings(id)->deadPsf = v; });
@@ -829,6 +860,114 @@ void PropertiesPanel::showRoofSettings(ObjectId id, const RoofSettings& r, bool 
                    "or ceiling load. The truss maker designs the trusses themselves.</span>"
                  : "<span style='color:#666'>Rafters bear on the eave walls; ceiling joists also bear on "
                    "interior bearing walls they cross.</span>");
+}
+
+// Rafter size and spacing, heel height and sheathing, like the Framing and
+// Materials panels of Chief's roof plane specification.
+void PropertiesPanel::showRoofFraming(ObjectId id, const RoofSettings& r, bool plane) {
+    const bool trusses = r.framing == RoofFraming::Trusses;
+    heading(trusses ? "Trusses" : "Rafters");
+    if (!trusses) {
+        const auto choices = structural::rafterChoices();
+        QStringList names;
+        int index = -1;
+        for (size_t k = 0; k < choices.size(); ++k) {
+            names << QString::fromStdString(choices[k]->name);
+            if (choices[k]->id == r.rafterMemberId) index = static_cast<int>(k);
+        }
+        if (index < 0) {
+            names << QString::fromStdString(r.rafterMemberId);
+            index = names.size() - 1;
+        }
+        choice("Rafter size", names, index, [id, choices](Document& d, int v) {
+            if (v < static_cast<int>(choices.size())) d.roofSettings(id)->rafterMemberId = choices[v]->id;
+        });
+    } else {
+        info("Top chord", "2x4 (the truss maker sizes it)");
+    }
+    number(trusses ? "Truss spacing" : "Rafter spacing", r.rafterSpacing, 6, 48, 1, "\" o.c.",
+           [id](Document& d, double v) { d.roofSettings(id)->rafterSpacing = v; });
+
+    // Heel height: empty is worked out from the framing.
+    RoofSettings automatic = r;
+    automatic.heelHeight = 0.0;
+    auto* heel = new QLineEdit(r.heelHeight > 0 ? shortLength(r.heelHeight) : QString());
+    heel->setPlaceholderText(QString("Auto, %1").arg(shortLength(automatic.effectiveHeel())));
+    heel->setToolTip(trusses ? "Plumb height from the top of the wall plate to the top of the truss at the bearing "
+                               "line. Raise it for an energy heel with full insulation over the wall."
+                             : "Plumb height from the top of the wall plate to the top of the rafter at the bearing "
+                               "line, above the birdsmouth. Leave empty to leave two thirds of the rafter.");
+    const QString shown = heel->text();
+    connect(heel, &QLineEdit::editingFinished, this, [this, heel, id, shown] {
+        if (heel->text() == shown) return;
+        double v = 0.0;
+        if (!heel->text().trimmed().isEmpty()) {
+            const auto parsed = parseLength(heel->text().toStdString());
+            if (!parsed || *parsed < 0) {
+                heel->setText(shown);
+                return;
+            }
+            v = *parsed;
+        }
+        apply("Change heel height", [id, v](Document& d) { d.roofSettings(id)->heelHeight = v; });
+    });
+    form_->addRow("Heel height", heel);
+
+    heading("Roof sheathing");
+    static const std::vector<std::pair<double, QString>> kSheathing{
+        {0.375, "3/8\""}, {0.4375, "7/16\""}, {0.46875, "15/32\""}, {0.5, "1/2\""}, {0.59375, "19/32\""},
+        {0.625, "5/8\""}, {0.71875, "23/32\""}, {0.75, "3/4\""}};
+    QStringList thick;
+    int at = -1;
+    for (size_t k = 0; k < kSheathing.size(); ++k) {
+        thick << kSheathing[k].second;
+        if (std::abs(kSheathing[k].first - r.sheathingThickness) < 1e-6) at = static_cast<int>(k);
+    }
+    if (at < 0) {
+        thick << shortLength(r.sheathingThickness);
+        at = thick.size() - 1;
+    }
+    choice("Thickness", thick, at, [id](Document& d, int v) {
+        if (v < static_cast<int>(kSheathing.size())) d.roofSettings(id)->sheathingThickness = kSheathing[v].first;
+    });
+    const QStringList materials{"OSB", "Plywood"};
+    const int mat = std::max<int>(0, static_cast<int>(materials.indexOf(QString::fromStdString(r.sheathingMaterial))));
+    choice("Material", materials, mat, [id, materials](Document& d, int v) { d.roofSettings(id)->sheathingMaterial = materials[v].toStdString(); });
+
+    if (!plane || trusses) return;
+    const RoofPlane* p = ws_->doc().roofPlane(id);
+    if (!p) return;
+    const auto check = structural::checkRafters(ws_->doc(), *p);
+    if (!check.checked) {
+        if (!check.note.empty()) note("<span style='color:#666'>" + QString::fromStdString(check.note).toHtmlEscaped() + "</span>");
+        return;
+    }
+    const auto& res = check.result;
+    info("Longest rafter span", feetInches(check.span) + " level, overhang not counted");
+    info("Rafter check", QString("<span style='color:%1'><b>%2</b></span>, %3% of capacity (%4)")
+                             .arg(res.passes ? "#1a7f37" : "#c62828", res.passes ? "Passes" : "Fails")
+                             .arg(res.maxRatio * 100.0, 0, 'f', 0)
+                             .arg(QString::fromStdString(res.governingCheck)));
+    button("Use the smallest rafter that works", [this, id] {
+        const Document& doc = ws_->doc();
+        const RoofPlane* x = doc.roofPlane(id);
+        if (!x) return;
+        // Same species and grade, shallowest first.
+        const std::string species = x->rafterMemberId.substr(0, x->rafterMemberId.find("-1-"));
+        auto choices = structural::rafterChoices();
+        std::stable_sort(choices.begin(), choices.end(), [](const auto* a, const auto* b) { return a->d < b->d; });
+        for (const auto* m : choices) {
+            if (m->id.rfind(species, 0) != 0) continue;
+            RoofPlane trial = *x;
+            trial.rafterMemberId = m->id;
+            if (structural::checkRafters(doc, trial).result.passes) {
+                const std::string pick = m->id;
+                apply("Size rafters", [id, pick](Document& d) { d.roofSettings(id)->rafterMemberId = pick; });
+                return;
+            }
+        }
+        emit ws_->notice("No single rafter of this species works at this spacing; try closer spacing.");
+    });
 }
 
 void PropertiesPanel::showPlatform(const FloorPlatform& f) {

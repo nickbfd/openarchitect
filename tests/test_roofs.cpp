@@ -201,3 +201,191 @@ TEST_CASE("a plus-shaped house with gable ends on every wing") {
     }
     CHECK(sum == Approx(144 * 432 * 2 - 144 * 144));
 }
+
+namespace {
+
+const RoofPlane* planeOver(const std::vector<RoofPlane>& planes, Vec2 a, Vec2 b, double baseHeight = 0.0) {
+    for (const auto& r : planes)
+        if (distance(r.a, a) < 1e-6 && distance(r.b, b) < 1e-6 && std::abs(r.baseHeight - baseHeight) < 1e-6) return &r;
+    return nullptr;
+}
+
+double maxX(const Polygon& p) {
+    double x = -1e30;
+    for (Vec2 q : p) x = std::max(x, q.x);
+    return x;
+}
+
+double minRise(const RoofPlane& r) {
+    double z = 1e30;
+    for (Vec2 q : r.outline) z = std::min(z, r.riseAt(q));
+    return z;
+}
+
+} // namespace
+
+TEST_CASE("an edge that changes speed partway up gets a second face above the break") {
+    // Steep 12 in 12 to 96" up, then 4 in 12, with gable ends.
+    const std::vector<SkeletonEdge> edges{{1.0, 96.0, 3.0}, {0.0}, {1.0, 96.0, 3.0}, {0.0}};
+    const auto faces = skeletonFaces(kRect, edges);
+    REQUIRE(faces.size() == 6);
+    double sum = 0;
+    for (const auto& f : faces) sum += f.outline.empty() ? 0.0 : area(f.outline);
+    CHECK(sum == Approx(480 * 336));
+    CHECK(faces[0].phase == 0);
+    CHECK(area(faces[0].outline) == Approx(480 * 96));
+    const auto upper = std::find_if(faces.begin(), faces.end(), [](const SkeletonFace& f) { return f.edge == 0 && f.phase == 1; });
+    REQUIRE(upper != faces.end());
+    CHECK(upper->startHeight == Approx(96));
+    CHECK(area(upper->outline) == Approx(480 * 72));
+}
+
+TEST_CASE("a gambrel roof breaks to a shallower upper pitch that meets the lower one") {
+    House h;
+    for (ObjectId id : {h.south, h.north}) {
+        h.d.wall(id)->roof.pitch = 12;
+        h.d.wall(id)->roof.upperPitch = 4;
+        h.d.wall(id)->roof.upperStart = 96;
+    }
+    for (ObjectId id : {h.east, h.west}) h.d.wall(id)->roof.kind = WallRoof::FullGable;
+    const auto planes = buildRoofPlanes(h.d, h.level);
+    REQUIRE(planes.size() == 4);
+    const RoofPlane* lower = planeOver(planes, {0, 0}, {480, 0});
+    const RoofPlane* upper = planeOver(planes, {0, 0}, {480, 0}, 96.0 * (1 - 1.0 / 3.0));
+    REQUIRE(lower);
+    REQUIRE(upper);
+    CHECK(upper->pitch == 4);
+    // The two meet at the break, 96" up, and the ridge is 24" higher.
+    CHECK(lower->riseAt({240, 96}) == Approx(96));
+    CHECK(upper->riseAt({240, 96}) == Approx(96));
+    CHECK(upper->riseAt({240, 168}) == Approx(120));
+    // The upper plane runs out over the gable rakes like the lower one.
+    CHECK(maxX(upper->outline) == Approx(492));
+    CHECK(maxX(lower->outline) == Approx(492));
+}
+
+TEST_CASE("a mansard has a steep plane and a shallow one on every wall") {
+    House h;
+    for (ObjectId id : {h.south, h.west, h.north, h.east}) {
+        h.d.wall(id)->roof.pitch = 24;
+        h.d.wall(id)->roof.upperPitch = 3;
+        h.d.wall(id)->roof.upperStart = 96;
+    }
+    const auto planes = buildRoofPlanes(h.d, h.level);
+    REQUIRE(planes.size() == 8);
+    int upper = 0;
+    for (const auto& r : planes) {
+        if (r.pitch != 3) continue;
+        ++upper;
+        // The upper hip roof sits on a 384" by 240" deck and peaks 30" above it.
+        double top = 0;
+        for (Vec2 q : r.outline) top = std::max(top, r.riseAt(q));
+        CHECK(top == Approx(126));
+        CHECK(minRise(r) == Approx(96));
+    }
+    CHECK(upper == 4);
+}
+
+TEST_CASE("a Dutch gable hips up to its start height, then stands up as a gable") {
+    House h;
+    for (ObjectId id : {h.east, h.west}) {
+        h.d.wall(id)->roof.kind = WallRoof::DutchGable;
+        h.d.wall(id)->roof.upperStart = 24; // 48" in at 6 in 12
+    }
+    const auto planes = buildRoofPlanes(h.d, h.level);
+    REQUIRE(planes.size() == 4);
+    const RoofPlane* east = planeOver(planes, {480, 0}, {480, 336});
+    REQUIRE(east);
+    double top = 0;
+    for (Vec2 q : east->outline) top = std::max(top, east->riseAt(q));
+    CHECK(top == Approx(24));
+    // The little hip has the eave overhang, not the gable one.
+    CHECK(maxX(east->outline) == Approx(498));
+    const RoofPlane* south = planeOver(planes, {0, 0}, {480, 0});
+    REQUIRE(south);
+    // The ridge runs to the gable 48" in, then out over it by the rake overhang.
+    double ridgeEnd = -1e30;
+    for (Vec2 q : south->outline)
+        if (std::abs(q.y - 168) < 1e-6) ridgeEnd = std::max(ridgeEnd, q.x);
+    CHECK(ridgeEnd == Approx(444));
+}
+
+TEST_CASE("a full gable wall with an upper pitch makes a half hip") {
+    House h;
+    for (ObjectId id : {h.east, h.west}) {
+        h.d.wall(id)->roof.kind = WallRoof::FullGable;
+        h.d.wall(id)->roof.upperPitch = 6;
+        h.d.wall(id)->roof.upperStart = 60;
+    }
+    const auto planes = buildRoofPlanes(h.d, h.level);
+    REQUIRE(planes.size() == 4);
+    const RoofPlane* east = planeOver(planes, {480, 0}, {480, 336}, 60.0);
+    REQUIRE(east);
+    // The clipped hip starts 60" up and hangs 12" past the gable.
+    CHECK(maxX(east->outline) == Approx(492));
+    CHECK(minRise(*east) == Approx(54));
+    const RoofPlane* south = planeOver(planes, {0, 0}, {480, 0});
+    REQUIRE(south);
+    double ridgeEnd = -1e30;
+    for (Vec2 q : south->outline)
+        if (std::abs(q.y - 168) < 1e-6) ridgeEnd = std::max(ridgeEnd, q.x);
+    CHECK(ridgeEnd == Approx(432));
+    // Side and hip planes meet along the hip, out to the hip's eave.
+    for (Vec2 q : east->outline)
+        for (Vec2 p : south->outline)
+            if (distance(p, q) < 1e-6) CHECK(east->riseAt(q) == Approx(south->riseAt(p)));
+}
+
+TEST_CASE("heel height and sheathing raise the roof surface above the plate") {
+    RoofPlane r;
+    r.pitch = 6;
+    r.rafterMemberId = "dfl-no2-1-2x10";
+    CHECK(r.rafterDepth() == Approx(9.25));
+    // Two thirds of the rafter's plumb depth is left above the birdsmouth.
+    CHECK(r.effectiveHeel() == Approx(9.25 * std::sqrt(1.25) * 2 / 3));
+    r.heelHeight = 12;
+    CHECK(r.effectiveHeel() == 12);
+    CHECK(r.surfaceAbovePlate() == Approx(12 + 0.4375 * std::sqrt(1.25)));
+    r.framing = RoofFraming::Trusses;
+    r.heelHeight = 0;
+    CHECK(r.effectiveHeel() == Approx(3.5 + 3.5 * std::sqrt(1.25)));
+    CHECK(sawnLumberDepth("2x12") == Approx(11.25));
+    CHECK(sawnLumberDepth("glulam-24f-5.125x12") == 0);
+    CHECK(lumberSize("syp-no2-2-2x8") == "2x8");
+}
+
+TEST_CASE("build roof planes take their framing from the build roof defaults") {
+    House h;
+    h.d.roofDefaults.rafterMemberId = "dfl-no2-1-2x12";
+    h.d.roofDefaults.rafterSpacing = 24;
+    h.d.roofDefaults.heelHeight = 10;
+    h.d.roofDefaults.sheathingThickness = 0.625;
+    for (const auto& r : buildRoofPlanes(h.d, h.level)) {
+        CHECK(r.rafterMemberId == "dfl-no2-1-2x12");
+        CHECK(r.rafterSpacing == 24);
+        CHECK(r.heelHeight == 10);
+        CHECK(r.sheathingThickness == 0.625);
+    }
+}
+
+TEST_CASE("an automatic rebuild keeps the rafter size set on a plane, build roof resets it") {
+    House h;
+    h.d.roofDefaults.autoRebuild = true;
+    REQUIRE(buildRoof(h.d, h.level) == 4);
+    RoofPlane& first = h.d.roofPlanes.front();
+    const ObjectId id = first.id;
+    const Document before = h.d;
+    first.rafterMemberId = "dfl-no2-1-2x10";
+    first.heelHeight = 11;
+    CHECK_FALSE(roofEditedByHand(before, h.d));
+    // Moving a wall rebuilds the roof; the plane keeps its framing.
+    h.d.wall(h.north)->a.y = h.d.wall(h.north)->b.y = 360;
+    h.d.wall(h.west)->b.y = h.d.wall(h.east)->a.y = 360;
+    h.d.refresh();
+    const RoofPlane* again = h.d.roofPlane(id);
+    REQUIRE(again);
+    CHECK(again->rafterMemberId == "dfl-no2-1-2x10");
+    CHECK(again->heelHeight == 11);
+    buildRoof(h.d, h.level);
+    CHECK(h.d.roofPlane(id)->rafterMemberId == h.d.roofDefaults.rafterMemberId);
+}

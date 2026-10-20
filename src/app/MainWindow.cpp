@@ -12,6 +12,7 @@
 #include "oa/core/roof_builder.h"
 #include "oa/core/serialization.h"
 #include "oa/core/units.h"
+#include "oa/structural/rafters.h"
 #include "oa/structural/takedown.h"
 
 #include <QActionGroup>
@@ -566,6 +567,28 @@ void MainWindow::buildRoofDialog() {
     auto* framing = new QComboBox;
     framing->addItems({"Rafters (stick framed)", "Manufactured trusses"});
     framing->setCurrentIndex(current.framing == RoofFraming::Trusses ? 1 : 0);
+    auto* rafter = new QComboBox;
+    const auto rafters = structural::rafterChoices();
+    for (const auto* m : rafters) rafter->addItem(QString::fromStdString(m->name), QString::fromStdString(m->id));
+    rafter->setCurrentIndex(std::max(0, rafter->findData(QString::fromStdString(current.rafterMemberId))));
+    auto* spacing = new QDoubleSpinBox;
+    spacing->setRange(6, 48);
+    spacing->setDecimals(1);
+    spacing->setSuffix("\" o.c.");
+    spacing->setValue(current.rafterSpacing);
+    auto* heel = new QLineEdit(current.heelHeight > 0 ? QString::fromStdString(formatFeetInches(current.heelHeight, 16)) : QString());
+    heel->setPlaceholderText("Automatic from the framing");
+    auto* sheathing = new QComboBox;
+    const std::vector<std::pair<double, QString>> thicknesses{
+        {0.375, "3/8\""}, {0.4375, "7/16\""}, {0.46875, "15/32\""}, {0.5, "1/2\""}, {0.59375, "19/32\""},
+        {0.625, "5/8\""}, {0.71875, "23/32\""}, {0.75, "3/4\""}};
+    for (const auto& [t, name] : thicknesses) {
+        sheathing->addItem(name, t);
+        if (std::abs(t - current.sheathingThickness) < 1e-6) sheathing->setCurrentIndex(sheathing->count() - 1);
+    }
+    auto* material = new QComboBox;
+    material->addItems({"OSB", "Plywood"});
+    material->setCurrentIndex(current.sheathingMaterial == "Plywood" ? 1 : 0);
     auto* ceiling = new QCheckBox("Flat ceiling under the roof");
     ceiling->setChecked(current.ceiling);
     auto* build = new QCheckBox("Build roof planes now");
@@ -576,11 +599,19 @@ void MainWindow::buildRoofDialog() {
     form->addRow("Eave overhang", eave);
     form->addRow("Gable overhang", gable);
     form->addRow("Framing", framing);
+    form->addRow("Rafter size", rafter);
+    form->addRow("Rafter or truss spacing", spacing);
+    form->addRow("Heel height", heel);
+    form->addRow("Sheathing", sheathing);
+    form->addRow("Sheathing material", material);
+    connect(framing, &QComboBox::currentIndexChanged, rafter, [rafter](int v) { rafter->setEnabled(v == 0); });
+    rafter->setEnabled(framing->currentIndex() == 0);
     form->addRow(ceiling);
     form->addRow(build);
     form->addRow(autoRebuild);
-    auto* hint = new QLabel("Walls build a sloped plane unless they are set to Full gable or High shed in their "
-                            "properties. Each wall can have its own pitch and overhang.");
+    auto* hint = new QLabel("Walls build a sloped plane unless they are set to Full gable, High shed or Dutch gable "
+                            "in their properties. Each wall can have its own pitch, overhang and upper pitch "
+                            "(gambrel, mansard, half hip).");
     hint->setWordWrap(true);
     hint->setStyleSheet("color: #666");
     form->addRow(hint);
@@ -596,6 +627,12 @@ void MainWindow::buildRoofDialog() {
     if (auto v = parseLength(gable->text().toStdString()); v && *v >= 0) next.gableOverhang = *v;
     next.framing = framing->currentIndex() == 1 ? RoofFraming::Trusses : RoofFraming::Rafters;
     next.ceiling = ceiling->isChecked();
+    if (rafter->currentIndex() >= 0) next.rafterMemberId = rafter->currentData().toString().toStdString();
+    next.rafterSpacing = spacing->value();
+    next.heelHeight = 0.0;
+    if (auto v = parseLength(heel->text().toStdString()); v && *v > 0) next.heelHeight = *v;
+    next.sheathingThickness = sheathing->currentData().toDouble();
+    next.sheathingMaterial = material->currentText().toStdString();
     next.autoRebuild = autoRebuild->isChecked();
 
     // The roof goes over this level's exterior walls, or the highest level

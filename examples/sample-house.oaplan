@@ -597,7 +597,12 @@
       "eaveOverhang": 18.0,
       "framing": "rafters",
       "gableOverhang": 12.0,
-      "pitch": 6.0
+      "heelHeight": 0.0,
+      "pitch": 6.0,
+      "rafterMemberId": "dfl-no2-1-2x8",
+      "rafterSpacing": 16.0,
+      "sheathingMaterial": "OSB",
+      "sheathingThickness": 0.4375
     },
     "roofPlanes": [
       {
@@ -611,11 +616,13 @@
           192.0,
           -72.0
         ],
+        "baseHeight": 0.0,
         "ceilingDeadPsf": 10.0,
         "customSnow": false,
         "deadPsf": 15.0,
         "framing": "rafters",
         "hasCeiling": false,
+        "heelHeight": 0.0,
         "highBearing": true,
         "id": 30,
         "levelId": 6,
@@ -639,7 +646,11 @@
         ],
         "overhang": 18.0,
         "pitch": 3.0,
+        "rafterMemberId": "dfl-no2-1-2x8",
+        "rafterSpacing": 16.0,
         "run": 0.0,
+        "sheathingMaterial": "OSB",
+        "sheathingThickness": 0.4375,
         "snowPsf": 0.0
       },
       {
@@ -653,11 +664,13 @@
           480.0,
           0.0
         ],
+        "baseHeight": 0.0,
         "ceilingDeadPsf": 10.0,
         "customSnow": false,
         "deadPsf": 15.0,
         "framing": "rafters",
         "hasCeiling": true,
+        "heelHeight": 0.0,
         "highBearing": false,
         "id": 57,
         "levelId": 7,
@@ -681,7 +694,11 @@
         ],
         "overhang": 18.0,
         "pitch": 6.0,
+        "rafterMemberId": "dfl-no2-1-2x8",
+        "rafterSpacing": 16.0,
         "run": 0.0,
+        "sheathingMaterial": "OSB",
+        "sheathingThickness": 0.4375,
         "snowPsf": 0.0
       },
       {
@@ -695,11 +712,13 @@
           0.0,
           336.0
         ],
+        "baseHeight": 0.0,
         "ceilingDeadPsf": 10.0,
         "customSnow": false,
         "deadPsf": 15.0,
         "framing": "rafters",
         "hasCeiling": true,
+        "heelHeight": 0.0,
         "highBearing": false,
         "id": 58,
         "levelId": 7,
@@ -723,7 +742,11 @@
         ],
         "overhang": 18.0,
         "pitch": 6.0,
+        "rafterMemberId": "dfl-no2-1-2x8",
+        "rafterSpacing": 16.0,
         "run": 0.0,
+        "sheathingMaterial": "OSB",
+        "sheathingThickness": 0.4375,
         "snowPsf": 0.0
       }
     ],
@@ -1137,7 +1160,9 @@
         "roof": {
           "kind": "sloped",
           "overhang": -1.0,
-          "pitch": 0.0
+          "pitch": 0.0,
+          "upperPitch": 0.0,
+          "upperStart": 48.0
         },
         "roomDivider": false,
         "selfWeightPsf": 8.5514453125,
@@ -1160,7 +1185,9 @@
         "roof": {
           "kind": "sloped",
           "overhang": -1.0,
-          "pitch": 0.0
+          "pitch": 0.0,
+          "upperPitch": 0.0,
+          "upperStart": 48.0
         },
         "roomDivider": false,
         "selfWeightPsf": 8.5514453125,
@@ -1183,7 +1210,9 @@
         "roof": {
           "kind": "sloped",
           "overhang": -1.0,
-          "pitch": 0.0
+          "pitch": 0.0,
+          "upperPitch": 0.0,
+          "upperStart": 48.0
         },
         "roomDivider": false,
         "selfWeightPsf": 8.5514453125,
@@ -1206,7 +1235,9 @@
         "roof": {
           "kind": "sloped",
           "overhang": -1.0,
-          "pitch": 0.0
+          "pitch": 0.0,
+          "upperPitch": 0.0,
+          "upperStart": 48.0
         },
         "roomDivider": false,
         "selfWeightPsf": 8.5514453125,
@@ -1229,7 +1260,9 @@
         "roof": {
           "kind": "sloped",
           "overhang": -1.0,
-          "pitch": 0.0
+          "pitch": 0.0,
+          "upperPitch": 0.0,
+          "upperStart": 48.0
         },
         "roomDivider": false,
         "selfWeightPsf": 5.9791015625,
@@ -1252,7 +1285,9 @@
         "roof": {
           "kind": "sloped",
           "overhang": -1.0,
-          "pitch": 0.0
+          "pitch": 0.0,
+          "upperPitch": 0.0,
+          "upperStart": 48.0
         },
         "roomDivider": false,
         "selfWeightPsf": 5.9791015625,
@@ -1275,7 +1310,9 @@
         "roof": {
           "kind": "sloped",
           "overhang": -1.0,
-          "pitch": 0.0
+          "pitch": 0.0,
+          "upperPitch": 0.0,
+          "upperStart": 48.0
         },
         "roomDivider": true,
         "selfWeightPsf": 0.0,
@@ -1298,7 +1335,9 @@
         "roof": {
           "kind": "sloped",
           "overhang": -1.0,
-          "pitch": 0.0
+          "pitch": 0.0,
+          "upperPitch": 0.0,
+          "upperStart": 48.0
         },
         "roomDivider": true,
         "selfWeightPsf": 0.0,
@@ -1321,7 +1360,9 @@
         "roof": {
           "kind": "sloped",
           "overhang": -1.0,
-          "pitch": 0.0
+          "pitch": 0.0,
+          "upperPitch": 0.0,
+          "upperStart": 48.0
         },
         "roomDivider": true,
         "selfWeightPsf": 0.0,
@@ -1344,7 +1385,9 @@
         "roof": {
           "kind": "sloped",
           "overhang": -1.0,
-          "pitch": 0.0
+          "pitch": 0.0,
+          "upperPitch": 0.0,
+          "upperStart": 48.0
         },
         "roomDivider": true,
         "selfWeightPsf": 0.0,
@@ -1367,7 +1410,9 @@
         "roof": {
           "kind": "sloped",
           "overhang": -1.0,
-          "pitch": 0.0
+          "pitch": 0.0,
+          "upperPitch": 0.0,
+          "upperStart": 48.0
         },
         "roomDivider": false,
         "selfWeightPsf": 8.5514453125,
@@ -1390,7 +1435,9 @@
         "roof": {
           "kind": "fullGable",
           "overhang": -1.0,
-          "pitch": 0.0
+          "pitch": 0.0,
+          "upperPitch": 0.0,
+          "upperStart": 48.0
         },
         "roomDivider": false,
         "selfWeightPsf": 8.5514453125,
@@ -1413,7 +1460,9 @@
         "roof": {
           "kind": "sloped",
           "overhang": -1.0,
-          "pitch": 0.0
+          "pitch": 0.0,
+          "upperPitch": 0.0,
+          "upperStart": 48.0
         },
         "roomDivider": false,
         "selfWeightPsf": 8.5514453125,
@@ -1436,7 +1485,9 @@
         "roof": {
           "kind": "fullGable",
           "overhang": -1.0,
-          "pitch": 0.0
+          "pitch": 0.0,
+          "upperPitch": 0.0,
+          "upperStart": 48.0
         },
         "roomDivider": false,
         "selfWeightPsf": 8.5514453125,
@@ -1459,7 +1510,9 @@
         "roof": {
           "kind": "sloped",
           "overhang": -1.0,
-          "pitch": 0.0
+          "pitch": 0.0,
+          "upperPitch": 0.0,
+          "upperStart": 48.0
         },
         "roomDivider": false,
         "selfWeightPsf": 5.9791015625,

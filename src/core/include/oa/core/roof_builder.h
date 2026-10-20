@@ -14,6 +14,27 @@ namespace oa {
 // starting with the edge itself), empty for edges whose face has no area.
 std::vector<Polygon> skeletonFaces(const Polygon& outline, const std::vector<double>& speed);
 
+// An edge of the skeleton's outline that can change speed partway up: from
+// `changeHeight` (when positive) it moves at `upperSpeed` instead, like the
+// break of a gambrel or the top of a Dutch gable.
+struct SkeletonEdge {
+    double speed = 1.0;
+    double changeHeight = -1.0;
+    double upperSpeed = 0.0;
+};
+
+// One face of a skeleton whose edges change speed: the part of edge `edge`'s
+// roof from `startHeight` up (phase 0 from the outline, phase 1 above the change).
+struct SkeletonFace {
+    size_t edge = 0;
+    int phase = 0;
+    double startHeight = 0.0;
+    Polygon outline; // empty when it has no area
+};
+
+// The faces of the skeleton, the first outline.size() of them phase 0 in edge order.
+std::vector<SkeletonFace> skeletonFaces(const Polygon& outline, const std::vector<SkeletonEdge>& edges);
+
 // One side of the loop of a level's exterior walls, counterclockwise.
 struct LoopEdge {
     Vec2 a, b;
@@ -33,12 +54,15 @@ std::vector<LoopEdge> exteriorWallLoop(const Document& doc, ObjectId levelId);
 std::vector<RoofPlane> buildRoofPlanes(const Document& doc, ObjectId levelId);
 
 // Replaces the automatic roof planes on a level with freshly built ones,
-// keeping their ids where it can. Returns how many planes were made; 0 when
-// the level's exterior walls don't close.
-int buildRoof(Document& doc, ObjectId levelId);
+// keeping their ids where it can. With `keepSettings`, each plane keeps the
+// framing, sheathing and loads set on the plane it replaces (an automatic
+// rebuild); otherwise they all come from the roof defaults (Build Roof).
+// Returns how many planes were made; 0 when the level's exterior walls don't close.
+int buildRoof(Document& doc, ObjectId levelId, bool keepSettings = false);
 
-// Rebuilds the automatic roof on every level that has one. Document::refresh
-// calls it when the roof defaults say to rebuild automatically.
+// Rebuilds the automatic roof on every level that has one, keeping each
+// plane's own settings. Document::refresh calls it when the roof defaults
+// say to rebuild automatically.
 void rebuildAutomaticRoofs(Document& doc);
 
 // Whether an edit changed automatic roof planes by hand: they differ from
